@@ -16,13 +16,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Core System Tools
     python3 \
     python3-pip \
+    ruby \
+    ruby-dev \
+    # Build Tools
+    build-essential \
+    zlib1g-dev \
+    libgmp-dev \
+    libyaml-dev \
+    pkg-config \
     git \
     curl \
     wget \
     # Web Recon Tools
     whois \
     dnsutils \
-    whatweb \
     ffuf \
     theharvester \
     dnsenum \
@@ -57,6 +64,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Clean up to keep image smaller
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+RUN git clone https://github.com/urbanadventurer/WhatWeb.git /usr/share/whatweb \
+    && cd /usr/share/whatweb \
+    && rm -f Gemfile.lock \
+    && sed -i '0,/gem "rchardet"/! {0,/gem "rchardet"/ s/gem "rchardet".*//}' Gemfile \
+    && gem install bundler \
+    && gem install webrick \
+    && bundle install \
+    && ln -s /usr/share/whatweb/whatweb /usr/bin/whatweb \
+    && chmod +x /usr/share/whatweb/whatweb
 
 # ---------------------------------------------------------------
 # USER CONFIGURATION
