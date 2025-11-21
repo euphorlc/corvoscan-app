@@ -1,10 +1,26 @@
 #!/bin/bash
 
-# 1. (Placeholder) Update Rulesets
-# In the future, we will add: git pull origin main ...
-echo "[-] Checking for CorvoScan ruleset updates..."
+# Define where rules should live
+RULES_DIR="/home/corvo/app/rulesets"
+REPO_URL="https://github.com/euphorlc/corvoscan-rules.git"
 
-# 2. Run the Application
-# We use "$@" to allow passing arguments to the container if needed
-echo "[+] Starting CorvoScan..."
+echo "[-] Initializing CorvoScan Environment..."
+
+# Handle Dynamic Rulesets
+if [ -d "$RULES_DIR" ]; then
+    echo "[-] Updating existing rulesets..."
+    cd "$RULES_DIR"
+    git pull origin main
+else
+    echo "[-] Cloning rulesets for the first time..."
+    # Create dir if not exists
+    git clone "$REPO_URL" "$RULES_DIR"
+fi
+
+# Return to app dir
+cd /home/corvo/app
+
+# Run the Application
+echo "[+] Starting CorvoScan GUI..."
+# Pass all arguments ($@) to the python script
 python3 main.py "$@"
