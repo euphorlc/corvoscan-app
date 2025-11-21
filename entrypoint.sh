@@ -2,7 +2,7 @@
 
 # Define where rules should live
 RULES_DIR="/home/corvo/app/rulesets"
-REPO_URL="https://github.com/euphorlc/corvoscan-rules.git"
+REPO_URL="https://github.com/euphorlc/corvoscan-rulesets.git"
 
 echo "[-] Initializing CorvoScan Environment..."
 
