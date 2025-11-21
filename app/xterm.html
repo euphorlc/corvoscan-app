@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>xterm.js Terminal</title>
+  <link rel="stylesheet" href="xterm.css" />
+  <style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #222;
+    overflow: hidden; /* Prevent scroll bars on body */
+  }
+  #terminal {
+    width: 100%;
+    height: 100%;
+    font-family: "Fira Mono", "Consolas", "Menlo", "Monaco", "monospace";
+    tab-size: 8;
+    -moz-tab-size: 8;
+    -o-tab-size: 8;
+    /* Important: don't force an internal horizontal scrollbar — let xterm fit to the container */
+    overflow: hidden;
+    white-space: normal;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  </style>
+</head>
+<body>
+  <div id="terminal"></div>
+
+  <script src="xterm.js"></script>
+  <script src="xterm-addon-fit.js"></script>
+  <script>
+  (function () {
+    "use strict";
+    window.termReady = false;
+
+    function safeGetFitCtor() {
+      // Try common UMD export shapes for the Fit addon
+      if (typeof window.FitAddon === "object" && typeof window.FitAddon.FitAddon === "function") {
+        return window.FitAddon.FitAddon;
+      }
+      if (typeof window.FitAddon === "function") {
+        return window.FitAddon;
+      }
+      if (window.FitAddon && typeof window.FitAddon.default === "function") {
+        return window.FitAddon.default;
+      }
+      if (typeof FitAddon !== "undefined") {
+        try {
+          if (typeof FitAddon.FitAddon === "function") return FitAddon.FitAddon;
+          if (typeof FitAddon === "function") return FitAddon;
+        } catch (e) {}
+      }
+      return null;
+    }
+
+    function initTerminal() {
+      try {
+        // Create terminal (fallback to default ctor if options cause an issue)
+        try {
+          window.term = new Terminal({ theme: { background: '#222', foreground: '#eee' } });
+        } catch (e) {
+          window.term = new Terminal();
+        }
+
+        var FitCtor = safeGetFitCtor();
+        var fitAddon = null;
+        if (FitCtor) {
+          try {
+            fitAddon = new FitCtor();
+            if (typeof window.term.loadAddon === "function") {
+              window.term.loadAddon(fitAddon);
+            } else if (typeof window.term.loadAddon === "undefined" && typeof window.term.loadAddon === "undefined") {
+              // no-op: newer xterm versions use .loadAddon or .loadAddon is polyfilled
+            }
+          } catch (e) {
+            fitAddon = null;
+          }
+        }
+
+        var container = document.getElementById('terminal');
+        window.term.open(container);
+
+        function doFit() {
+          if (!fitAddon) {
+            return;
+          }
+          try {
+            fitAddon.fit();
+          } catch (err) {
+            // retry once shortly after to handle timing/layout races
+            setTimeout(function () {
+              try { fitAddon.fit(); } catch (_) {}
+            }, 50);
+          }
+        }
+
+        // initial fit + a couple of delayed retries for robustness
+        doFit();
+        setTimeout(doFit, 60);
+        setTimeout(doFit, 300);
+
+        // Fit on window resize and on container size changes
+        window.addEventListener('resize', doFit);
+
+        if (typeof ResizeObserver !== "undefined" && fitAddon) {
+          try {
+            var ro = new ResizeObserver(function () { doFit(); });
+            ro.observe(container);
+          } catch (e) {
+            // ignore if ResizeObserver not fully supported
+          }
+        }
+
+        // allow external callers (Python) to trigger a fit
+        window.fitTerminal = doFit;
+
+        try { window.term.write('Welcome to CorvoScan!\r\n'); } catch (e) {}
+        window.termReady = true;
+      } catch (e) {
+        // silent fail — the page may still be usable for raw output fallbacks
+        window.termReady = false;
+      }
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", initTerminal);
+    } else {
+      initTerminal();
+    }
+  })();
+  </script>
+</body>
+</html>
