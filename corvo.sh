@@ -3,12 +3,12 @@
 # CorvoScan Universal Launcher
 # Supports: WSL2 (Windows), Native Linux, and MacOS (Intel/M-Series)
 
-APP_NAME="corvoscan:final"
+APP_NAME="euphorlc/corvoscan:latest"
 CONTAINER_NAME="corvoscan_instance"
 OUTPUT_DIR="$(pwd)/output"
 RULES_DIR="$(pwd)/rulesets"
 
-# Create output directory for results persistence 
+# Create output directory for results persistence
 mkdir -p "$OUTPUT_DIR"
 
 # Detect Kernel Info
@@ -29,7 +29,7 @@ if [[ "$KERNEL_RELEASE" == *"WSL2"* ]]; then
 
 elif [[ "$KERNEL_NAME" == "Darwin" ]]; then
     echo "    > MacOS detected."
-    
+
     # Check for XQuartz (Required for X11 Forwarding)
     if ! command -v xhost &> /dev/null; then
         echo "    [!] ERROR: XQuartz is not installed."
@@ -45,14 +45,14 @@ elif [[ "$KERNEL_NAME" == "Darwin" ]]; then
 
     # Docker Magic Hostname for Mac
     DISPLAY_VAR="host.docker.internal:0"
-    
+
     NET_FLAGS=""
     X11_MOUNT=""
 
 elif [[ "$KERNEL_NAME" == "Linux" ]]; then
     echo "    > Standard Linux detected."
     X11_MOUNT="-v /tmp/.X11-unix:/tmp/.X11-unix"
-    
+
     # Allow docker user to write to X server
     if command -v xhost &> /dev/null; then
         xhost +local:docker > /dev/null 2>&1
