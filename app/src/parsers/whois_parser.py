@@ -35,7 +35,7 @@ class DomainInfo:
     admin_contact: ContactInfo = None
     tech_contact: ContactInfo = None
     additional_info: Dict[str, str] = None
-    
+
     def __post_init__(self):
         if self.domain_status is None:
             self.domain_status = []
@@ -70,7 +70,7 @@ class NetworkInfo:
     country: str = ""
     abuse_contacts: List[str] = None
     tech_contacts: List[str] = None
-    
+
     def __post_init__(self):
         if self.abuse_contacts is None:
             self.abuse_contacts = []
@@ -86,11 +86,11 @@ class WhoisResult(ParsedResult):
     raw_registrar_data: str = ""
     additional_info: Dict[str, str] = None
     diagnostics: List[Dict[str, Any]] = field(default_factory=list)
-    
+
     def __post_init__(self):
         if self.additional_info is None:
             self.additional_info = {}
-    
+
     def to_dict(self) -> Dict[str, Any]:
         result = super().to_dict()
         if self.domain_info:
@@ -105,14 +105,14 @@ class WhoisResult(ParsedResult):
 
 class WhoisParser(ToolResultsParser):
     """Parser for Whois output"""
-    
+
     def __init__(self):
         super().__init__("whois")
-    
+
     def parse(self, target: str) -> WhoisResult:
         """Parse Whois output for domain or IP"""
         raw_output = self.get_raw_output()
-        
+
         # Skip parsing if we have no meaningful content
         if not raw_output.strip() or len(self.raw_lines) < 3:
             return WhoisResult(
@@ -124,19 +124,19 @@ class WhoisParser(ToolResultsParser):
                 success=False,
                 error_message="No whois data available"
             )
-        
+
         # Check if this is RPSL format (RIPE database)
-        is_rpsl = ("% This is the RIPE Database" in raw_output or 
-                   "inet-rtr:" in raw_output or 
+        is_rpsl = ("% This is the RIPE Database" in raw_output or
+                   "inet-rtr:" in raw_output or
                    "inetnum:" in raw_output or
                    "organisation:" in raw_output or
                    "% [whois.apnic.net]" in raw_output or
                    "% IANA WHOIS server" in raw_output)
-        
+
         # Determine if target is IP or domain
         is_ip = self._is_ip_address(target)
         query_type = "ip" if is_ip else "domain"
-        
+
         if self._has_errors():
             return WhoisResult(
                 tool_name=self.tool_name,
@@ -147,7 +147,7 @@ class WhoisParser(ToolResultsParser):
                 success=False,
                 error_message=self._extract_error_message()
             )
-        
+
         # Handle RPSL format (from -B or -r flags)
         if is_rpsl:
             domain_info = self._parse_rpsl_format()
@@ -165,7 +165,7 @@ class WhoisParser(ToolResultsParser):
             except Exception:
                 result.diagnostics = []
             return result
-        
+
         if is_ip:
             network_info = self._parse_ip_whois()
             result = WhoisResult(
@@ -199,12 +199,12 @@ class WhoisParser(ToolResultsParser):
             except Exception:
                 result.diagnostics = []
             return result
-    
+
     def _is_ip_address(self, target: str) -> bool:
         """Check if target is an IP address"""
         ip_pattern = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
         return bool(re.match(ip_pattern, target))
-    
+
     def _has_errors(self) -> bool:
         """Check for Whois errors"""
         error_indicators = [
@@ -221,17 +221,17 @@ class WhoisParser(ToolResultsParser):
             "This query looks like a domain name"  # ARIN specific
         ]
         output = self.get_raw_output().lower()
-        
+
         # Don't treat RIPE/RPSL format as error
         if "% This is the RIPE Database" in self.get_raw_output():
             return False
-        
+
         return any(indicator.lower() in output for indicator in error_indicators)
-    
+
     def _extract_error_message(self) -> Optional[str]:
         """Extract error message from output and provide user-friendly message"""
         output = self.get_raw_output()
-        
+
         # Check for specific error patterns and return cleaner messages
         if "%ERROR:101: no entries found" in output or "no entries found" in output.lower():
             # Extract which sources were searched
@@ -245,46 +245,46 @@ class WhoisParser(ToolResultsParser):
                 return "No records found in RIPE database (Europe region). This target may not be registered in this region."
             else:
                 return "No records found in whois database for this query."
-        
+
         if "No match for" in output or "No match found for" in output:
             # ARIN and LACNIC style
             if "ARIN WHOIS" in output:
                 return "No match found in ARIN database. Note: ARIN handles IP addresses/networks, not domain names. Try querying with an IP address instead."
             else:
                 return "No matching records found for this query in the selected whois server."
-        
+
         if "% This query looks like a domain name" in output:
             return "The whois server expects an IP address or network, not a domain name. Please resolve the domain to an IP first or use a different whois server."
-        
+
         # Extract first actual error line for other cases
         for line in self.raw_lines:
             line = line.strip()
             if any(error in line.lower() for error in ["no whois server", "connection timed out", "error:", "whois limit exceeded", "no such domain", "domain not found"]):
                 return line
-        
+
         return "Whois lookup failed - no data returned from server."
-    
+
     def _parse_domain_whois(self) -> DomainInfo:
         """Parse domain Whois information - handles multi-section whois output"""
         domain_info = DomainInfo()
         current_contact = None
-        
+
         # Process all lines and take the most recent/complete information
         # Handle cases where multiple fields are concatenated in single lines
         all_field_lines = []
-        
+
         for line in self.raw_lines:
             # Skip debug and completion messages
             if line.strip().startswith('DEBUG') or '[SCAN COMPLETED]' in line:
                 continue
-                
+
             # Split lines that contain multiple whois fields (separated by newlines)
             if '\n' in line:
                 sub_lines = line.split('\n')
                 all_field_lines.extend(sub_lines)
             else:
                 all_field_lines.append(line)
-        
+
         # Handle UK-style indented format where value is on next line
         # Example:
         #     Domain name:
@@ -293,7 +293,7 @@ class WhoisParser(ToolResultsParser):
         i = 0
         while i < len(all_field_lines):
             line = all_field_lines[i].strip()
-            
+
             # Check if this is a label line ending with colon but no value
             if line and ':' in line and not line.startswith('#') and not line.startswith('%'):
                 parts = line.split(':', 1)
@@ -306,34 +306,34 @@ class WhoisParser(ToolResultsParser):
                             processed_lines.append(f"{parts[0]}: {next_line}")
                             i += 2  # Skip next line as we've processed it
                             continue
-            
+
             processed_lines.append(all_field_lines[i])
             i += 1
-        
+
         for line in processed_lines:
             line = line.strip()
             if not line or line.startswith('#') or line.startswith('%') or line.startswith('>>>'):
                 continue
-            
+
             # Skip common footer text that appears in whois output
             if any(footer in line.lower() for footer in [
-                'for more information', 'terms of use', 'notice:', 'the data in', 
+                'for more information', 'terms of use', 'notice:', 'the data in',
                 'by submitting', 'web-based whois:', 'if you wish to contact',
                 'the registry database contains', 'markmonitor domain management',
                 'protecting companies', 'visit markmonitor', 'contact us at'
             ]):
                 continue
-            
+
             # Basic domain information
             if ':' in line:
                 key, value = line.split(':', 1)
                 key = key.strip().lower().replace(' ', '_')
                 value = value.strip()
-                
+
                 # Skip empty values
                 if not value:
                     continue
-                
+
                 # Domain name (prefer lowercase clean version)
                 if 'domain_name' in key or key == 'domain':
                     # Only take the first word/line for domain name, clean up any extra data
@@ -341,7 +341,7 @@ class WhoisParser(ToolResultsParser):
                     clean_domain = clean_domain.split('\n')[0]  # Take only first line
                     if not domain_info.domain_name or len(clean_domain) < len(domain_info.domain_name):
                         domain_info.domain_name = clean_domain
-                
+
                 # Registry information (prefer more detailed registrar info)
                 elif 'registry_domain_id' in key:
                     domain_info.registry_domain_id = value
@@ -353,7 +353,7 @@ class WhoisParser(ToolResultsParser):
                     # Only accept if it looks like a registrar name (not an email or date)
                     if '@' not in value and 'T' not in value and not re.match(r'\d{4}-\d{2}-\d{2}', value):
                         domain_info.registrar = value
-                
+
                 # Dates (prefer the more recent/detailed format)
                 elif any(date_key in key for date_key in ['creation_date', 'created', 'registered_on']):
                     normalized_date = self._normalize_date(value)
@@ -367,7 +367,7 @@ class WhoisParser(ToolResultsParser):
                     normalized_date = self._normalize_date(value)
                     if normalized_date and (not domain_info.expiry_date or len(normalized_date) > len(domain_info.expiry_date)):
                         domain_info.expiry_date = normalized_date
-                
+
                 # Domain status (collect all unique statuses)
                 elif 'domain_status' in key or (key == 'status' and 'domain' not in line.lower()):
                     # Clean status (remove URLs in parentheses and after spaces)
@@ -375,17 +375,17 @@ class WhoisParser(ToolResultsParser):
                     clean_status = re.sub(r'\s+https?://.*$', '', clean_status).strip()
                     if clean_status and clean_status not in domain_info.domain_status:
                         domain_info.domain_status.append(clean_status)
-                
+
                 # Name servers (collect all unique servers)
                 elif 'name_server' in key or 'nserver' in key:
                     clean_ns = value.lower().strip()
                     if clean_ns and clean_ns not in domain_info.name_servers:
                         domain_info.name_servers.append(clean_ns)
-                
+
                 # DNSSEC
                 elif 'dnssec' in key:
                     domain_info.dnssec = value
-                
+
                 # Contact information detection
                 elif any(contact_type in key for contact_type in ['registrant', 'admin', 'tech']):
                     if 'registrant' in key:
@@ -394,26 +394,26 @@ class WhoisParser(ToolResultsParser):
                         current_contact = domain_info.admin_contact
                     elif 'tech' in key:
                         current_contact = domain_info.tech_contact
-                    
+
                     if current_contact:
                         self._parse_contact_field(current_contact, key, value)
-        
+
         return domain_info
-    
+
     def _parse_ip_whois(self) -> NetworkInfo:
         """Parse IP/Network Whois information"""
         network_info = NetworkInfo()
-        
+
         for line in self.raw_lines:
             line = line.strip()
             if not line or line.startswith('#'):
                 continue
-            
+
             if ':' in line:
                 key, value = line.split(':', 1)
                 key = key.strip().lower().replace(' ', '')
                 value = value.strip()
-                
+
                 # Network information
                 if key == 'netrange':
                     network_info.net_range = value
@@ -429,7 +429,7 @@ class WhoisParser(ToolResultsParser):
                     network_info.net_type = value
                 elif key == 'originas':
                     network_info.origin_as = value
-                
+
                 # Organization information
                 elif key == 'orgname' or key == 'organization':
                     network_info.organization = value
@@ -446,13 +446,13 @@ class WhoisParser(ToolResultsParser):
                     network_info.postal_code = value
                 elif key == 'country':
                     network_info.country = value
-                
+
                 # Dates
                 elif key == 'regdate':
                     network_info.reg_date = self._normalize_date(value)
                 elif key == 'updated':
                     network_info.updated = self._normalize_date(value)
-                
+
                 # Contacts
                 elif 'abuse' in key and 'email' in key:
                     if value not in network_info.abuse_contacts:
@@ -460,9 +460,9 @@ class WhoisParser(ToolResultsParser):
                 elif 'tech' in key and 'email' in key:
                     if value not in network_info.tech_contacts:
                         network_info.tech_contacts.append(value)
-        
+
         return network_info
-    
+
     def _parse_rpsl_format(self) -> DomainInfo:
         """Parse RPSL format (RIPE/APNIC/IANA databases) - used with -B, -r flags or specific servers"""
         domain_info = DomainInfo()
@@ -472,37 +472,37 @@ class WhoisParser(ToolResultsParser):
         admin_email = ""
         netname = ""
         descr_parts = []
-        
+
         # Handle cases where multiple fields are concatenated in single lines
         all_field_lines = []
-        
+
         for line in self.raw_lines:
             # Skip debug and completion messages
             if line.strip().startswith('DEBUG') or '[SCAN COMPLETED]' in line:
                 continue
-                
+
             # Split lines that contain multiple whois fields (separated by newlines)
             if '\n' in line:
                 sub_lines = line.split('\n')
                 all_field_lines.extend(sub_lines)
             else:
                 all_field_lines.append(line)
-        
+
         for line in all_field_lines:
             line = line.strip()
-            
+
             # Skip comments and empty lines
             if not line or line.startswith('%') or line.startswith('#'):
                 continue
-            
+
             if ':' in line:
                 key, value = line.split(':', 1)
                 key = key.strip().lower()
                 value = value.strip()
-                
+
                 if not value:
                     continue
-                
+
                 # Domain/network name - multiple possible fields
                 if key == 'inet-rtr':
                     domain_info.domain_name = value.lower()
@@ -517,11 +517,11 @@ class WhoisParser(ToolResultsParser):
                     netname = value
                     if not domain_info.domain_name:
                         domain_info.domain_name = value.lower()
-                
+
                 # Description (useful for network blocks)
                 elif key == 'descr':
                     descr_parts.append(value)
-                
+
                 # Organization information
                 elif key == 'org-name':
                     org_name = value
@@ -533,11 +533,11 @@ class WhoisParser(ToolResultsParser):
                         domain_info.registrant_contact.organization = value
                 elif key == 'org':
                     domain_info.registry_domain_id = value
-                
+
                 # Country
                 elif key == 'country':
                     domain_info.registrant_contact.country = value
-                
+
                 # Contact information
                 elif key == 'e-mail':
                     if not org_email:
@@ -550,20 +550,20 @@ class WhoisParser(ToolResultsParser):
                     # APNIC abuse contact
                     if not domain_info.admin_contact.email:
                         domain_info.admin_contact.email = value
-                
+
                 # Address information
                 elif key == 'address':
                     if domain_info.registrant_contact.address:
                         domain_info.registrant_contact.address += f", {value}"
                     else:
                         domain_info.registrant_contact.address = value
-                
+
                 # Contact names
                 elif key == 'name':
                     # Usually appears under contact: sections
                     if not domain_info.registrant_contact.name:
                         domain_info.registrant_contact.name = value
-                
+
                 # Phone/Fax
                 elif key == 'phone':
                     domain_info.registrant_contact.phone = value
@@ -571,7 +571,7 @@ class WhoisParser(ToolResultsParser):
                     if not domain_info.additional_info:
                         domain_info.additional_info = {}
                     domain_info.additional_info['fax'] = value
-                
+
                 # Technical/admin contacts
                 elif key == 'admin-c' or key == 'tech-c':
                     admin_contact = value
@@ -579,7 +579,7 @@ class WhoisParser(ToolResultsParser):
                         domain_info.admin_contact.name = value
                     else:
                         domain_info.tech_contact.name = value
-                
+
                 # Role name (RIPE format - describes the contact role)
                 elif key == 'role':
                     # Store role as the admin contact name if we don't have a better name
@@ -588,7 +588,7 @@ class WhoisParser(ToolResultsParser):
                         # Prefer descriptive role name over NIC handle
                         if domain_info.admin_contact.name == admin_contact:
                             domain_info.admin_contact.name = f"{value} ({admin_contact})"
-                
+
                 # NIC handle (network information center handle)
                 elif key == 'nic-hdl':
                     # This is a reference ID, store it in additional info
@@ -598,13 +598,13 @@ class WhoisParser(ToolResultsParser):
                         domain_info.additional_info['nic_handles'] = []
                     if value not in domain_info.additional_info['nic_handles']:
                         domain_info.additional_info['nic_handles'].append(value)
-                
+
                 # Organization type (RIPE)
                 elif key == 'org-type':
                     if not domain_info.additional_info:
                         domain_info.additional_info = {}
                     domain_info.additional_info['org_type'] = value
-                
+
                 # Maintainer (RIPE)
                 elif key == 'mnt-by':
                     if not domain_info.additional_info:
@@ -613,7 +613,7 @@ class WhoisParser(ToolResultsParser):
                         domain_info.additional_info['maintainers'] = []
                     if value not in domain_info.additional_info['maintainers']:
                         domain_info.additional_info['maintainers'].append(value)
-                
+
                 # Dates
                 elif key == 'created':
                     domain_info.creation_date = self._normalize_date(value)
@@ -622,13 +622,13 @@ class WhoisParser(ToolResultsParser):
                 elif key == 'changed':
                     # IANA uses 'changed' instead of 'updated' or 'last-modified'
                     domain_info.updated_date = self._normalize_date(value)
-                
+
                 # AS information
                 elif key == 'local-as':
                     if not domain_info.additional_info:
                         domain_info.additional_info = {}
                     domain_info.additional_info['as_number'] = value
-                
+
                 # Name servers (IANA format: nserver)
                 elif key == 'nserver':
                     # Format: A.GTLD-SERVERS.NET 192.5.6.30 2001:503:a83e:0:0:0:2:30
@@ -637,13 +637,13 @@ class WhoisParser(ToolResultsParser):
                         ns_name = parts[0].lower()
                         if ns_name not in domain_info.name_servers:
                             domain_info.name_servers.append(ns_name)
-                
+
                 # IP addresses (store as name servers for display purposes)
                 elif key == 'ifaddr':
                     ip_addr = value.split()[0]  # Get just the IP, ignore masklen
                     if ip_addr and ip_addr not in domain_info.name_servers:
                         domain_info.name_servers.append(ip_addr)
-                
+
                 # Status
                 elif key == 'status':
                     # Clean status - take only the first word/value before any other fields
@@ -654,20 +654,20 @@ class WhoisParser(ToolResultsParser):
                     clean_status = clean_status.split('changed:')[0].strip()
                     if clean_status and clean_status not in domain_info.domain_status:
                         domain_info.domain_status.append(clean_status)
-                    
+
                     # Extract embedded fields from aggregated status line
                     # Check for created: in the value
                     if 'created:' in value:
                         created_match = re.search(r'created:\s*(\S+)', value)
                         if created_match and not domain_info.creation_date:
                             domain_info.creation_date = self._normalize_date(created_match.group(1))
-                    
+
                     # Check for changed: in the value
                     if 'changed:' in value:
                         changed_match = re.search(r'changed:\s*(\S+)', value)
                         if changed_match and not domain_info.updated_date:
                             domain_info.updated_date = self._normalize_date(changed_match.group(1))
-                    
+
                     # Check for remarks: in the value
                     if 'remarks:' in value:
                         remarks_match = re.search(r'remarks:\s*(.+?)(?:created:|changed:|source:|$)', value)
@@ -675,7 +675,7 @@ class WhoisParser(ToolResultsParser):
                             if not domain_info.additional_info:
                                 domain_info.additional_info = {}
                             domain_info.additional_info['remarks'] = remarks_match.group(1).strip()
-                    
+
                     # Check for source: in the value
                     if 'source:' in value:
                         source_match = re.search(r'source:\s*(\S+)', value)
@@ -683,34 +683,34 @@ class WhoisParser(ToolResultsParser):
                             if not domain_info.additional_info:
                                 domain_info.additional_info = {}
                             domain_info.additional_info['source'] = source_match.group(1)
-                
+
                 # Remarks (IANA format)
                 elif key == 'remarks':
                     if not domain_info.additional_info:
                         domain_info.additional_info = {}
                     domain_info.additional_info['remarks'] = value
-                
+
                 # Source (IANA/RIPE format)
                 elif key == 'source':
                     if not domain_info.additional_info:
                         domain_info.additional_info = {}
                     domain_info.additional_info['source'] = value
-                
+
                 # WHOIS server reference (IANA)
                 elif key == 'whois':
                     domain_info.registrar_whois_server = value
-                
+
                 # DS record data (DNSSEC)
                 elif key == 'ds-rdata':
                     domain_info.dnssec = f"Signed (DS record present)"
                     if not domain_info.additional_info:
                         domain_info.additional_info = {}
                     domain_info.additional_info['ds_record'] = value
-        
+
         # If we found organization info, set it as registrar
         if org_name:
             domain_info.registrar = org_name
-        
+
         # If we have descriptions, add them to additional info
         if descr_parts and not domain_info.registrar:
             # Use first description as registrar if we don't have one
@@ -719,18 +719,18 @@ class WhoisParser(ToolResultsParser):
                 if not domain_info.additional_info:
                     domain_info.additional_info = {}
                 domain_info.additional_info['description'] = '; '.join(descr_parts[1:])
-        
+
         # If netname exists and domain_name is IP range, add netname as registrar
         if netname and '-' in str(domain_info.domain_name):
             if not domain_info.registrar:
                 domain_info.registrar = netname
-        
+
         return domain_info
-    
+
     def _parse_contact_field(self, contact: ContactInfo, key: str, value: str):
         """Parse contact information fields"""
         key = key.lower()
-        
+
         if 'name' in key:
             contact.name = value
         elif 'organization' in key or 'org' in key:
@@ -752,19 +752,19 @@ class WhoisParser(ToolResultsParser):
             contact.phone = value
         elif 'email' in key:
             contact.email = value
-    
+
     def _normalize_date(self, date_str: str) -> str:
         """Normalize date format from various Whois formats"""
         if not date_str:
             return ""
-        
+
         # Remove common suffixes and clean up
         date_str = re.sub(r'\s*\(.*?\)', '', date_str)  # Remove parentheses content
         date_str = re.sub(r'\s*Z$', '', date_str)       # Remove Z timezone
         date_str = re.sub(r'\+\d{2}:\d{2}$', '', date_str)  # Remove timezone offset like +01:00
         date_str = re.sub(r'\+\d{4}$', '', date_str)    # Remove timezone offset like +0100
         date_str = date_str.strip()
-        
+
         # Try to parse common formats
         date_patterns = [
             r'(\d{4}-\d{2}-\d{2})',          # YYYY-MM-DD (ISO)
@@ -772,14 +772,14 @@ class WhoisParser(ToolResultsParser):
             r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})',  # ISO format with time
             r'(\d{2}-[A-Za-z]{3}-\d{4})',    # DD-Mon-YYYY (e.g., 14-Feb-1999 UK format)
         ]
-        
+
         for pattern in date_patterns:
             match = re.search(pattern, date_str)
             if match:
                 return match.group(1)
-        
+
         return date_str  # Return as-is if no pattern matches
-    
+
     def _compute_diagnostics(self,
                              findings: Optional[Any] = None,
                              scan_stats: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:

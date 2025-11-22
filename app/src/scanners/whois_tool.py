@@ -56,7 +56,7 @@ class WhoisToolProcess(ToolProcessBase):
         # "Object type (-T TYPE)": "-T",                 # commented out: hide from UI but keep reference
         # "Disable contact data filtering (-B)": "-B",   # commented out: hide from UI but keep reference
         # "Exact match only (-x)": "-x",                 # commented out per request
-        
+
         "Verbose output (--verbose)": "--verbose",
         "Suppress legal disclaimers (-H)": "-H",
         # "Show client version (-V)": "-V"  # commented/deprecated

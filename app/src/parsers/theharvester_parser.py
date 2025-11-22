@@ -44,7 +44,7 @@ class TheHarvesterResult(ParsedResult):
     total_results: int = 0
     scan_stats: Dict[str, Any] = field(default_factory=dict)
     diagnostics: List[Dict[str, Any]] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         result = super().to_dict()
         result.update({
@@ -62,10 +62,10 @@ class TheHarvesterResult(ParsedResult):
 
 class TheHarvesterParser(ToolResultsParser):
     """Parser for theHarvester output"""
-    
+
     def __init__(self):
         super().__init__("theharvester")
-    
+
     def parse(self, target: str) -> TheHarvesterResult:
         raw_output = self.get_raw_output()
         emails = []
@@ -74,22 +74,22 @@ class TheHarvesterParser(ToolResultsParser):
         people = []
         scan_stats = {}
         source_engine = ""
-        
+
         # Extract source engine from command or output
         source_engine = self._extract_source_engine()
-        
+
         # Parse different sections of theHarvester output
         self._parse_emails(emails, raw_output)
         self._parse_hosts(hosts, raw_output)
         self._parse_urls(urls, raw_output)
         self._parse_people(people, raw_output)
         self._parse_scan_stats(scan_stats, raw_output)
-        
+
         total_results = len(emails) + len(hosts) + len(urls) + len(people)
-        
+
         success = self._is_scan_successful(emails, hosts, urls, people, scan_stats)
         error_message = self._extract_error_message() if not success else None
-        
+
         result = TheHarvesterResult(
             tool_name="theharvester",
             target=target,
@@ -113,15 +113,15 @@ class TheHarvesterParser(ToolResultsParser):
             result.diagnostics = []
 
         return result
-    
+
     def _extract_source_engine(self) -> str:
         """Extract the source engine used for the scan"""
         raw_output = self.get_raw_output()
         if not raw_output:
             return ""
-            
+
         lines = raw_output.strip().split('\n')
-        
+
         for line in lines:
             # Look for command line or source indication
             if "-b" in line and "python" in line:
@@ -129,27 +129,27 @@ class TheHarvesterParser(ToolResultsParser):
                 match = re.search(r'-b\s+(\w+)', line)
                 if match:
                     return match.group(1)
-            
+
             # Look for source mentions in output
             if "Searching" in line and "results" in line:
                 # Format: "Searching 100 results from bing"
                 match = re.search(r'from\s+(\w+)', line)
                 if match:
                     return match.group(1)
-        
+
         return "unknown"
-    
+
     def _parse_emails(self, emails: List[EmailInfo], raw_output: str):
         """Parse email addresses from theHarvester output"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
         in_emails_section = False
-        
+
         for line in lines:
             line = line.strip()
-            
+
             # Section headers for emails (case insensitive)
             if "[*] emails found:" in line.lower():
                 in_emails_section = True
@@ -157,14 +157,14 @@ class TheHarvesterParser(ToolResultsParser):
             elif line.startswith("[*]") and "emails found:" not in line.lower():
                 in_emails_section = False
                 continue
-            
+
             # Parse email addresses only in emails section
             if in_emails_section and "@" in line and not line.startswith("*"):
                 # Extract email addresses from the line, but skip banner/header content
                 if not any(skip in line.lower() for skip in ["coded by", "edge-security", "theharvester", "*"]):
                     email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
                     matches = re.findall(email_pattern, line)
-                    
+
                     for email in matches:
                         # Skip if already found
                         if not any(e.email == email for e in emails):
@@ -172,18 +172,18 @@ class TheHarvesterParser(ToolResultsParser):
                                 email=email,
                                 source=self._extract_source_from_line(line)
                             ))
-    
+
     def _parse_hosts(self, hosts: List[HostInfo], raw_output: str):
         """Parse hostnames/subdomains from theHarvester output"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
         in_hosts_section = False
-        
+
         for line in lines:
             line = line.strip()
-            
+
             # Section headers - look for "Hosts found:" with count (case insensitive)
             if "[*] hosts found:" in line.lower():
                 in_hosts_section = True
@@ -191,21 +191,21 @@ class TheHarvesterParser(ToolResultsParser):
             elif line.startswith("[*]") and not any(host_keyword in line.lower() for host_keyword in ["hosts", "virtual"]):
                 in_hosts_section = False
                 continue
-            
+
             # Parse hostnames only in hosts section
             if in_hosts_section and line:
                 # Skip separator lines like "---------------------"
                 if "-" in line and len(set(line)) <= 2:
                     continue
-                
+
                 # Skip non-hostname lines (banner, messages, etc.)
                 if any(skip in line.lower() for skip in [
-                    "read ", "searching", "theharvester", "coded by", 
-                    "edge-security", "*", "scan completed", "api-keys", 
+                    "read ", "searching", "theharvester", "coded by",
+                    "edge-security", "*", "scan completed", "api-keys",
                     "proxies", "results"
                 ]):
                     continue
-                
+
                 # Handle format: "subdomain.example.com" or "subdomain.example.com:192.168.1.1"
                 if ':' in line:
                     # Format: hostname:ip
@@ -216,16 +216,16 @@ class TheHarvesterParser(ToolResultsParser):
                     # Format: just hostname
                     hostname = line.strip()
                     ip = ""
-                
+
                 # Validate it's a proper hostname (must have domain extension and no spaces)
-                if ('.' in hostname and 
-                    len(hostname) > 3 and 
+                if ('.' in hostname and
+                    len(hostname) > 3 and
                     ' ' not in hostname and
                     not hostname.startswith('.') and
                     not hostname.endswith('.') and
                     hostname.count('.') >= 1 and
                     not any(char in hostname for char in ['*', '/', '\\', ' ', '\t'])):
-                    
+
                     # Must end with a valid TLD-like extension
                     parts = hostname.split('.')
                     if len(parts) >= 2 and len(parts[-1]) >= 2 and parts[-1].isalpha():
@@ -236,18 +236,18 @@ class TheHarvesterParser(ToolResultsParser):
                                 ip=ip,
                                 source=self._extract_source_from_line(line)
                             ))
-    
+
     def _parse_urls(self, urls: List[URLInfo], raw_output: str):
         """Parse URLs from theHarvester output"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
         in_urls_section = False
-        
+
         for line in lines:
             line = line.strip()
-            
+
             # Section headers
             if "[*] urls found:" in line.lower() or "[*] interesting urls found:" in line.lower():
                 in_urls_section = True
@@ -255,13 +255,13 @@ class TheHarvesterParser(ToolResultsParser):
             elif line.startswith("[*]") and "url" not in line.lower():
                 in_urls_section = False
                 continue
-            
+
             # Parse URLs
             if in_urls_section or line.startswith("http"):
                 # Extract URLs
                 url_pattern = r'https?://[^\s<>"]+|www\.[^\s<>"]+'
                 matches = re.findall(url_pattern, line)
-                
+
                 for url in matches:
                     # Skip if already found
                     if not any(u.url == url for u in urls):
@@ -269,18 +269,18 @@ class TheHarvesterParser(ToolResultsParser):
                             url=url,
                             source=self._extract_source_from_line(line)
                         ))
-    
+
     def _parse_people(self, people: List[PersonInfo], raw_output: str):
-        """Parse people/contacts from theHarvester output"""  
+        """Parse people/contacts from theHarvester output"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
         in_people_section = False
-        
+
         for line in lines:
             line = line.strip()
-            
+
             # Section headers
             if any(header in line.lower() for header in ["[*] people found:", "[*] users found:", "[*] profiles found:"]):
                 in_people_section = True
@@ -288,24 +288,24 @@ class TheHarvesterParser(ToolResultsParser):
             elif line.startswith("[*]") and not any(word in line.lower() for word in ["people", "user", "profile"]):
                 in_people_section = False
                 continue
-            
+
             # Parse people information
             if in_people_section and line and not line.startswith("-") and not line.startswith("[*]"):
                 # Clean the line
                 cleaned_line = line.strip()
-                
+
                 if cleaned_line:
-                    # Try to extract proper names (e.g., "John Doe") 
+                    # Try to extract proper names (e.g., "John Doe")
                     name_pattern = r'([A-Z][a-z]+\s+[A-Z][a-z]+)'
                     name_matches = re.findall(name_pattern, line)
-                    
+
                     for name in name_matches:
                         if not any(p.name == name for p in people):
                             people.append(PersonInfo(
                                 name=name,
                                 source=self._extract_source_from_line(line)
                             ))
-                    
+
                     # If no proper names found, treat the whole line as a username/handle
                     if not name_matches and len(cleaned_line) > 2 and ' ' not in cleaned_line:
                         # Skip if already found
@@ -314,58 +314,58 @@ class TheHarvesterParser(ToolResultsParser):
                                 name=cleaned_line,
                                 source=self._extract_source_from_line(line)
                             ))
-    
+
     def _parse_scan_stats(self, scan_stats: Dict[str, Any], raw_output: str):
         """Parse scan statistics from theHarvester output"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
-        
+
         for line in lines:
             line = line.strip()
-            
+
             # Extract search limits
             if "Searching" in line and "results" in line:
                 # Format: "Searching 100 results from bing"
                 limit_match = re.search(r'Searching\s+(\d+)\s+results', line)
                 if limit_match:
                     scan_stats['search_limit'] = int(limit_match.group(1))
-                
+
                 source_match = re.search(r'from\s+(\w+)', line)
                 if source_match:
                     scan_stats['source_engine'] = source_match.group(1)
-            
+
             # Extract timing information
             if "done:" in line.lower() or "finished" in line.lower():
                 # Try to extract timing info if present
                 time_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:seconds?|s)\b', line)
                 if time_match:
                     scan_stats['scan_time'] = float(time_match.group(1))
-            
+
             # Extract error information
             if "error" in line.lower() or "failed" in line.lower():
                 scan_stats['errors'] = scan_stats.get('errors', []) + [line]
-    
+
     def _extract_source_from_line(self, line: str) -> str:
         """Extract source information from a result line"""
         # theHarvester might include source information in the line
         # This is a placeholder - adjust based on actual theHarvester output format
         return ""
-    
-    def _is_scan_successful(self, emails: List[EmailInfo], hosts: List[HostInfo], 
-                          urls: List[URLInfo], people: List[PersonInfo], 
+
+    def _is_scan_successful(self, emails: List[EmailInfo], hosts: List[HostInfo],
+                          urls: List[URLInfo], people: List[PersonInfo],
                           scan_stats: Dict[str, Any]) -> bool:
         """Determine if the theHarvester scan was successful"""
-        
+
         # If we found any results, consider it successful
         if emails or hosts or urls or people:
             return True
-        
+
         # Check for explicit errors
         if scan_stats.get('errors'):
             return False
-        
+
         # Check for common error patterns in raw output
         raw_output = self.get_raw_output().lower()
         error_indicators = [
@@ -377,34 +377,34 @@ class TheHarvesterParser(ToolResultsParser):
             "permission denied",
             "not supported"
         ]
-        
+
         if any(indicator in raw_output for indicator in error_indicators):
             return False
-        
+
         # If no results but no explicit errors, consider it a successful scan with no results
         return True
-    
+
     def _extract_error_message(self) -> Optional[str]:
         """Extract error message from theHarvester output"""
         raw_output = self.get_raw_output()
         if not raw_output:
             return None
-            
+
         lines = raw_output.strip().split('\n')
-        
+
         for line in lines:
             line = line.strip()
-            
+
             # Look for explicit error messages
             if any(keyword in line.lower() for keyword in ["error:", "[!]", "invalid", "failed", "timeout"]):
                 return line
-            
+
             # Look for theHarvester-specific errors
             if "not supported" in line.lower() or "source" in line.lower():
                 return line
-        
+
         return None
-    
+
     def _compute_diagnostics(self,
                              findings: List[HostInfo],
                              scan_stats: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:

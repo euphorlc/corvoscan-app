@@ -314,7 +314,7 @@ class NSLookupParser(ToolResultsParser):
     def _extract_scan_type(self) -> str:
         """Extract scan type(s) performed in the Nmap output and return a comma-separated string."""
         output = self.get_raw_output() or ""
-        
+
         # Mapping of indicators to scan type names
         scan_map = {
             ("-type=A",): "IPv4 Address (A Record)",
@@ -325,7 +325,7 @@ class NSLookupParser(ToolResultsParser):
             ("-type=TXT",): "Text (TXT Record)",
             ("-type=CNAME",): "Canonical Name (CNAME Record)",
         }
-        
+
         detected_scans = []
         for indicators, scan_name in scan_map.items():
             if any(indicator in output for indicator in indicators):
@@ -543,7 +543,7 @@ class NSLookupParser(ToolResultsParser):
             )
 
         return None
-    
+
     def _extract_error_message(self) -> Optional[str]:
         for line in self.raw_lines:
             line = (line or "").strip()

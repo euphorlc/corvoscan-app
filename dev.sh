@@ -39,7 +39,7 @@ if [[ "$KERNEL_RELEASE" == *"WSL2"* ]]; then
 else
     echo "    > Environment: Native Linux"
     MOUNT_ARGS="-v /tmp/.X11-unix:/tmp/.X11-unix"
-    
+
     xhost +local:docker > /dev/null 2>&1
 fi
 

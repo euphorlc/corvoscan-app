@@ -2407,7 +2407,7 @@ class HelloWindow(QWidget):
                     elif len(checked_flags) == len(params_defs):
                         checked_by_name = {
                             params_defs[i]: bool(checked_flags[i])
-                            for i in range(len(paramsDefs))
+                            for i in range(len(params_defs))
                         }
                     else:
                         checked_by_name = {}

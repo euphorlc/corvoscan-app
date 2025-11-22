@@ -61,7 +61,7 @@ class DNSEnumResult(ParsedResult):
     total_subdomains: int = 0
     scan_stats: Dict[str, Any] = field(default_factory=dict)
     diagnostics: List[Dict[str, Any]] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         result = super().to_dict()
         result.update({
@@ -83,12 +83,12 @@ class DNSEnumResult(ParsedResult):
 class DNSEnumResultsParser(ToolResultsParser):
     def __init__(self):
         super().__init__("dnsenum")
-        
+
     def parse(self, target: str) -> DNSEnumResult:
         raw_output = self.get_raw_output()
         # Strip ANSI color codes from the output
         cleaned_output = strip_ansi_codes(raw_output)
-        
+
         host_addresses = []
         name_servers = []
         mail_servers = []
@@ -99,7 +99,7 @@ class DNSEnumResultsParser(ToolResultsParser):
         network_info = []
         wildcard_info = []
         scan_stats = {}
-        
+
         self._parse_host_addresses(host_addresses, cleaned_output)
         self._parse_name_servers(name_servers, cleaned_output)
         self._parse_mail_servers(mail_servers, cleaned_output)
@@ -110,15 +110,15 @@ class DNSEnumResultsParser(ToolResultsParser):
         self._parse_network_info(network_info, cleaned_output)
         self._parse_wildcard_info(wildcard_info, cleaned_output)
         self._parse_scan_stats(scan_stats, cleaned_output)
-        
+
         total_subdomains = len(subdomains)
 
         diagnostics = self._compute_diagnostics(host_addresses, name_servers, mail_servers, subdomains, dns_records, zone_transfers, reverse_dns, network_info, wildcard_info, scan_stats)
-        
+
         self._update_scan_stats(scan_stats, diagnostics)
         success = self._is_scan_successful(host_addresses, name_servers, subdomains, scan_stats)
         error_message = self._extract_error_message() if not success else None
-        
+
         return DNSEnumResult(
             tool_name="dnsenum",
             target=target,
@@ -140,18 +140,18 @@ class DNSEnumResultsParser(ToolResultsParser):
             scan_stats=scan_stats,
             diagnostics=diagnostics
         )
-    
+
     def _parse_host_addresses(self, host_addresses: List[DNSRecord], raw_output: str):
         """Parse main host addresses (A/AAAA records)"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
         in_hosts_section = False
-        
+
         for line in lines:
             line = line.strip()
-            
+
             # Look for "Host's addresses:" section
             if "Host's addresses:" in line or "Host addresses:" in line:
                 in_hosts_section = True
@@ -159,7 +159,7 @@ class DNSEnumResultsParser(ToolResultsParser):
             elif line.startswith("Name Servers:") or line.startswith("Mail (MX) Servers:"):
                 in_hosts_section = False
                 continue
-            
+
             if in_hosts_section and line:
                 # Parse DNS record format: domain.com. 300 IN A 1.2.3.4
                 dns_match = re.match(r'^([^\s]+)\.\s+(\d+)?\s*IN\s+([A-Z]+)\s+(.+)$', line)
@@ -168,7 +168,7 @@ class DNSEnumResultsParser(ToolResultsParser):
                     ttl = int(dns_match.group(2)) if dns_match.group(2) else None
                     record_type = dns_match.group(3)
                     value = dns_match.group(4).strip()
-                    
+
                     if record_type in ['A', 'AAAA']:
                         host_addresses.append(DNSRecord(
                             name=domain,
@@ -176,60 +176,60 @@ class DNSEnumResultsParser(ToolResultsParser):
                             value=value,
                             ttl=ttl
                         ))
-    
+
     def _parse_name_servers(self, name_servers: List[NameServerInfo], raw_output: str):
         """Parse name servers"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
         in_ns_section = False
-        
+
         for line in lines:
             line = line.strip()
-            
+
             if "Name Servers:" in line:
                 in_ns_section = True
                 continue
             elif line.startswith("Mail (MX) Servers:") or "Trying Zone Transfers" in line:
                 in_ns_section = False
                 continue
-            
+
             if in_ns_section and line:
                 # Parse: ns1.example.com. 172800 IN A 1.2.3.4
                 dns_match = re.match(r'^([^\s]+)\.\s+(\d+)?\s*IN\s+A\s+(.+)$', line)
                 if dns_match:
                     nameserver = dns_match.group(1)
                     ip_address = dns_match.group(3).strip()
-                    
+
                     name_servers.append(NameServerInfo(
                         nameserver=nameserver,
                         ip_address=ip_address
                     ))
-    
+
     def _parse_mail_servers(self, mail_servers: List[DNSRecord], raw_output: str):
         """Parse mail servers (MX records)"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
         in_mx_section = False
-        
+
         for line in lines:
             line = line.strip()
-            
+
             if "Mail (MX) Servers:" in line:
                 in_mx_section = True
                 continue
             elif "Trying Zone Transfers" in line or line.startswith("Brute forcing"):
                 in_mx_section = False
                 continue
-            
+
             if in_mx_section and line:
                 # Check for "No MX records found"
                 if "No MX records found" in line:
                     continue
-                
+
                 # Parse: domain.com. 300 IN MX 10 mail.example.com
                 mx_match = re.match(r'^([^\s]+)\.\s+(\d+)?\s*IN\s+MX\s+(\d+)\s+(.+)$', line)
                 if mx_match:
@@ -237,7 +237,7 @@ class DNSEnumResultsParser(ToolResultsParser):
                     ttl = int(mx_match.group(2)) if mx_match.group(2) else None
                     priority = int(mx_match.group(3))
                     value = mx_match.group(4).strip()
-                    
+
                     mail_servers.append(DNSRecord(
                         name=domain,
                         record_type="MX",
@@ -246,7 +246,7 @@ class DNSEnumResultsParser(ToolResultsParser):
                         priority=priority
                     ))
                     continue
-                
+
                 # Also parse A records for mail servers (common format)
                 # Parse: mx1.hostinger.com. 0 IN A 172.65.182.103
                 a_match = re.match(r'^([^\s]+)\.\s+(\d+)?\s*IN\s+A\s+([^\s]+)$', line)
@@ -254,25 +254,25 @@ class DNSEnumResultsParser(ToolResultsParser):
                     domain = a_match.group(1)
                     ttl = int(a_match.group(2)) if a_match.group(2) else 0
                     ip_address = a_match.group(3).strip()
-                    
+
                     mail_servers.append(DNSRecord(
                         name=domain,
                         record_type="A",
                         value=ip_address,
                         ttl=ttl
                     ))
-    
+
     def _parse_subdomains(self, subdomains: List[SubdomainInfo], raw_output: str):
         """Parse discovered subdomains from brute forcing"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
         in_brute_section = False
-        
+
         for line in lines:
             line = line.strip()
-            
+
             # Look for brute force section
             if "Brute forcing with" in line:
                 in_brute_section = True
@@ -280,7 +280,7 @@ class DNSEnumResultsParser(ToolResultsParser):
             elif "Performing reverse lookup" in line or "dnsenum.pl done" in line:
                 in_brute_section = False
                 continue
-            
+
             if in_brute_section and line:
                 # Parse: www.example.com. 300 IN A 1.2.3.4
                 subdomain_match = re.match(r'^([^\s]+)\.\s+(\d+)?\s*IN\s+([A-Z]+)\s+(.+)$', line)
@@ -288,7 +288,7 @@ class DNSEnumResultsParser(ToolResultsParser):
                     subdomain = subdomain_match.group(1)
                     record_type = subdomain_match.group(3)
                     ip_address = subdomain_match.group(4).strip()
-                    
+
                     # Check if subdomain already exists
                     existing = next((s for s in subdomains if s.subdomain == subdomain), None)
                     if existing:
@@ -301,17 +301,17 @@ class DNSEnumResultsParser(ToolResultsParser):
                             record_type=record_type,
                             source="brute_force"
                         ))
-    
+
     def _parse_dns_records(self, dns_records: List[DNSRecord], raw_output: str):
         """Parse additional DNS records (CNAME, TXT, SOA, etc.)"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
-        
+
         for line in lines:
             line = line.strip()
-            
+
             # Parse any DNS record format not caught by other methods
             dns_match = re.match(r'^([^\s]+)\.\s+(\d+)?\s*IN\s+([A-Z]+)\s+(.+)$', line)
             if dns_match:
@@ -319,7 +319,7 @@ class DNSEnumResultsParser(ToolResultsParser):
                 ttl = int(dns_match.group(2)) if dns_match.group(2) else None
                 record_type = dns_match.group(3)
                 value = dns_match.group(4).strip()
-                
+
                 # Only capture records not handled by other methods
                 if record_type in ['CNAME', 'TXT', 'SOA', 'PTR', 'SRV']:
                     dns_records.append(DNSRecord(
@@ -328,18 +328,18 @@ class DNSEnumResultsParser(ToolResultsParser):
                         value=value,
                         ttl=ttl
                     ))
-    
+
     def _parse_zone_transfers(self, zone_transfers: List[str], name_servers: List[NameServerInfo], raw_output: str):
         """Parse zone transfer attempts and results"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
         current_ns = None
-        
+
         for line in lines:
             line = line.strip()
-            
+
             # Look for zone transfer attempts
             if "Trying Zone Transfer" in line:
                 zone_transfers.append(line)
@@ -351,7 +351,7 @@ class DNSEnumResultsParser(ToolResultsParser):
                             ns.zone_transfer_possible = False
                         elif "succeeded" in line or "AXFR" in line:
                             ns.zone_transfer_possible = True
-            
+
             # Look for BIND version detection lines
             if "Bind Version for" in line:
                 # Extract nameserver from "Bind Version for nameserver:"
@@ -367,25 +367,25 @@ class DNSEnumResultsParser(ToolResultsParser):
                 version_match = re.search(r'version\.bind:\s*(.+)', line)
                 if version_match:
                     current_ns.bind_version = version_match.group(1).strip()
-    
+
     def _parse_reverse_dns(self, reverse_dns: List[str], raw_output: str):
         """Parse reverse DNS lookup results"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
         in_reverse_section = False
-        
+
         for line in lines:
             line = line.strip()
-            
+
             if "Performing reverse lookup" in line:
                 in_reverse_section = True
                 continue
             elif "dnsenum.pl done" in line or line.startswith("Trying to get"):
                 in_reverse_section = False
                 continue
-            
+
             if in_reverse_section and line:
                 # Parse: 1.2.3.4 example.com
                 reverse_match = re.match(r'^(\d+\.\d+\.\d+\.\d+)\s+(.+)$', line)
@@ -393,19 +393,19 @@ class DNSEnumResultsParser(ToolResultsParser):
                     ip = reverse_match.group(1)
                     hostname = reverse_match.group(2).strip()
                     reverse_dns.append(f"{ip} -> {hostname}")
-    
+
     def _parse_network_info(self, network_info: List[NetworkInfo], raw_output: str):
         """Parse network and netblock information"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
         in_netranges_section = False
         in_ipblocks_section = False
-        
+
         for line in lines:
             line = line.strip()
-            
+
             # Look for class C netranges section
             if "class C netranges:" in line:
                 in_netranges_section = True
@@ -422,7 +422,7 @@ class DNSEnumResultsParser(ToolResultsParser):
             elif not line or line.startswith("_"):
                 # Skip empty lines and underline separators but don't reset flags
                 continue
-            
+
             # Parse network ranges and IP blocks
             if (in_netranges_section or in_ipblocks_section) and line:
                 # Extract network CIDR (e.g., "18.140.25.0/24" or "18.140.25.243/32")
@@ -430,57 +430,57 @@ class DNSEnumResultsParser(ToolResultsParser):
                 if network_match:
                     ip_range = network_match.group(1)
                     netblock_type = "Class C Range" if in_netranges_section else "IP Block"
-                    
+
                     network_info.append(NetworkInfo(
                         ip_range=ip_range,
                         netblock=netblock_type
                     ))
-    
+
     def _parse_wildcard_info(self, wildcard_info: List[str], raw_output: str):
         """Parse wildcard DNS information"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
-        
+
         for line in lines:
             line = line.strip()
-            
+
             if "wildcard" in line.lower():
                 wildcard_info.append(line)
-    
+
     def _parse_scan_stats(self, scan_stats: Dict[str, Any], raw_output: str):
         """Parse scan statistics and metadata"""
         if not raw_output:
             return
-            
+
         lines = raw_output.strip().split('\n')
-        
+
         for line in lines:
             line = line.strip()
-            
+
             # Extract DNSEnum version
             if "dnsenum VERSION" in line:
                 version_match = re.search(r'VERSION:([^\s]+)', line)
                 if version_match:
                     scan_stats['dnsenum_version'] = version_match.group(1)
-            
+
             # Extract completion status
             if "dnsenum.pl done" in line or line == "done.":
                 scan_stats['scan_completed'] = True
-            
+
             # Extract brute force wordlist info
             if "Brute forcing with" in line:
                 wordlist_match = re.search(r'with\s+([^\s:]+)', line)
                 if wordlist_match:
                     scan_stats['wordlist_used'] = wordlist_match.group(1)
-            
+
             # Count reverse lookup attempts
             if "reverse lookup on" in line:
                 count_match = re.search(r'on\s+(\d+)\s+ip', line)
                 if count_match:
                     scan_stats['reverse_lookup_count'] = int(count_match.group(1))
-    
+
     def _compute_diagnostics(
         self,
         host_addresses: List[DNSRecord],

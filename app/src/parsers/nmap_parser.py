@@ -41,7 +41,7 @@ class OSInfo:
     family: str = ""
     generation: str = ""
     version: str = ""     # parsed OS version (e.g. "4.0", "8.2-RELEASE", "4.X")
-    cpe: str = "" 
+    cpe: str = ""
 
 @dataclass
 class SSLInfo:
@@ -72,7 +72,7 @@ class NmapResult(ParsedResult):
     traceroute: List[Dict[str, Any]] = None
     # Diagnostics computed by parser from ruleset
     diagnostics: List[Dict[str, Any]] = None
-    
+
     def __post_init__(self):
         if self.hosts is None:
             self.hosts = []
@@ -88,7 +88,7 @@ class NmapResult(ParsedResult):
             self.traceroute = []
         if self.diagnostics is None:
             self.diagnostics = []
-    
+
     def to_dict(self) -> Dict[str, Any]:
         result = super().to_dict()
         result['hosts'] = [host.__dict__ for host in self.hosts]
@@ -152,7 +152,7 @@ class NmapResultsParser(ToolResultsParser):
                         continue
         except Exception:
             self.compiled_service_map = []
-    
+
     def parse(self, target: str) -> NmapResult:
         raw_output = self.get_raw_output()
         hosts = []
@@ -197,7 +197,7 @@ class NmapResultsParser(ToolResultsParser):
     def _extract_scan_type(self) -> str:
         """Extract scan type(s) performed in the Nmap output and return a comma-separated string."""
         output = self.get_raw_output() or ""
-        
+
         # Mapping of indicators to scan type names
         scan_map = {
             ("SYN Stealth Scan", "-sS"): "SYN Stealth Scan",
@@ -209,39 +209,39 @@ class NmapResultsParser(ToolResultsParser):
             ("Script scan", "-sC"): "Script Scan",
             ("-A",): "Aggressive Scan"
         }
-        
+
         detected_scans = []
         for indicators, scan_name in scan_map.items():
             if any(indicator in output for indicator in indicators):
                 detected_scans.append(scan_name)
-        
+
         # If no scan types matched, return a default
         if not detected_scans:
             return "Standard Scan"
-        
+
         # Return as a single, stable comma-separated string
         # (NmapResult.scan_type is declared as str)
         return ", ".join(sorted(dict.fromkeys(detected_scans)))
-    
+
     def _parse_hosts_and_ports(self, hosts: List[HostInfo], ports: List[PortInfo]):
         """Parse host and port information"""
         current_host = None
-        
+
         for idx, raw_line in enumerate(self.raw_lines):
             line = raw_line.strip()
-            
+
             # Host discovery
             host_match = re.search(r'Nmap scan report for ([^\s]+)(?:\s+\(([^)]+)\))?', line)
             if host_match:
                 hostname = host_match.group(1)
                 ip = host_match.group(2) if host_match.group(2) else hostname
-                
+
                 # If hostname looks like an IP, swap them
                 if self._is_ip_address(hostname) and host_match.group(2):
                     ip, hostname = hostname, host_match.group(2)
                 elif self._is_ip_address(hostname):
                     ip, hostname = hostname, ""
-                
+
                 current_host = HostInfo(ip=ip, hostname=hostname)
                 hosts.append(current_host)
                 continue
@@ -263,14 +263,14 @@ class NmapResultsParser(ToolResultsParser):
                     if target_host:
                         target_host.other_addresses = addr_list
                 continue
-            
+
             # Host status
             if current_host and "Host is" in line:
                 status_match = re.search(r'Host is (\w+)', line)
                 if status_match:
                     current_host.status = status_match.group(1)
                 continue
-            
+
             # MAC Address
             if current_host and "MAC Address:" in line:
                 mac_match = re.search(r'MAC Address: ([A-Fa-f0-9:]{17})(?: \(([^)]+)\))?', line)
@@ -279,7 +279,7 @@ class NmapResultsParser(ToolResultsParser):
                     if mac_match.group(2):
                         current_host.vendor = mac_match.group(2)
                 continue
-            
+
             # Port information (supports "PORT STATE SERVICE [VERSION]" output from -sV)
             port_match = re.match(r'^(\d+)\/(tcp|udp)\s+(\w+)\s+(\S+)(?:\s+(.+))?$', line)
             if port_match:
@@ -552,7 +552,7 @@ class NmapResultsParser(ToolResultsParser):
 
                     # continue parsing other lines after attaching scripts
                     # (do not `continue` here; allow other parsers like ssh-hostkey to run)
-            
+
             # rDNS information
             rdns_match = re.search(r'rDNS record for\s+([\d\.]+):\s*(\S+)', line, re.IGNORECASE)
             if not rdns_match:
@@ -581,7 +581,7 @@ class NmapResultsParser(ToolResultsParser):
                     "all_hostnames": rdns_list,
                     "raw": rdns_full
                 }
-    
+
     def _parse_os_detection(self, os_info: List[OSInfo]):
         """Parse OS detection results, including device type, 'Running (JUST GUESSING)', and aggressive guesses."""
         # reset temp fields
@@ -724,12 +724,12 @@ class NmapResultsParser(ToolResultsParser):
                 if not already:
                     name_guess = c.get("product") or c.get("vendor") or ""
                     os_info.append(OSInfo(name=name_guess, version=c.get("version",""), accuracy=0, cpe=c.get("raw","")))
-    
+
     def _parse_scan_statistics(self, scan_stats: Dict[str, Any]):
         """Parse scan timing and statistics"""
         for line in self.raw_lines:
             line = line.strip()
-            
+
             # Scan timing
             if "done:" in line and "scanned" in line:
                 timing_match = re.search(r'done: (\d+) IP address(?:es)? \((\d+) host(?:s)? up\) scanned in ([\d.]+) seconds', line)
@@ -737,12 +737,12 @@ class NmapResultsParser(ToolResultsParser):
                     scan_stats['total_ips'] = int(timing_match.group(1))
                     scan_stats['hosts_up'] = int(timing_match.group(2))
                     scan_stats['scan_time'] = float(timing_match.group(3))
-            
+
             # Ports scanned
             ports_match = re.search(r'(\d+) ports scanned', line)
             if ports_match:
                 scan_stats['ports_scanned'] = int(ports_match.group(1))
-            
+
             # "Not shown:" lines — support variants like:
             #   Not shown: 98 filtered tcp ports (no-response)
             #   Not shown: 98 filtered ports (no-response)
@@ -777,7 +777,7 @@ class NmapResultsParser(ToolResultsParser):
                 proto_part = f" {proto}" if proto else ""
                 scan_stats['not_shown_display'] = f"{scan_stats.get('not_shown_count', '?')}{proto_part} ports ({scan_stats.get('not_shown_reason','').strip()})"
                 continue
-    
+
     def _parse_ssl_info(self, ssl_info: List[SSLInfo]):
         lines = self.raw_lines or []
         for idx, line in enumerate(lines):
@@ -839,8 +839,8 @@ class NmapResultsParser(ToolResultsParser):
                     si.issues = list(dict.fromkeys((si.issues or []) + [t]))
 
             ssl_info.append(si)
-      
-    
+
+
     def _is_scan_successful(self, *args, **kwargs):
         """
         Backwards-compatible wrapper for nmap scan-success checks.
@@ -892,7 +892,7 @@ class NmapResultsParser(ToolResultsParser):
 
         # Default to success to avoid spurious failures when unsure
         return True
-    
+
     def _has_critical_errors(self) -> bool:
         """Check if the scan output contains critical errors (excluding sudo prompts)"""
         critical_error_indicators = [
@@ -903,47 +903,47 @@ class NmapResultsParser(ToolResultsParser):
             "No route to host",
             "Network is unreachable"
         ]
-        
+
         # Sudo-related messages that should NOT be considered errors
         sudo_indicators = [
             "[sudo]",
             "password for",
             "Password:"
         ]
-        
+
         output = self.get_raw_output()
         lines = output.split('\n')
-        
+
         for line in lines:
             line_upper = line.upper()
-            
+
             # Skip lines that contain sudo prompts
             if any(sudo_indicator.upper() in line_upper for sudo_indicator in sudo_indicators):
                 continue
-                
+
             # Check for critical errors
             if any(error.upper() in line_upper for error in critical_error_indicators):
                 return True
-        
+
         return False
-    
+
     def _extract_error_message(self) -> Optional[str]:
         """Extract error message from output, ignoring sudo prompts"""
         sudo_indicators = ["[sudo]", "password for", "Password:"]
-        
+
         for line in self.raw_lines:
             line = line.strip()
             line_upper = line.upper()
-            
+
             # Skip sudo-related lines
             if any(sudo_indicator.upper() in line_upper for sudo_indicator in sudo_indicators):
                 continue
-                
+
             # Look for actual error messages
             if any(keyword in line_upper for keyword in ["ERROR", "QUITTING", "PERMISSION DENIED", "OPERATION NOT PERMITTED"]):
                 return line
         return None
-    
+
     def _is_ip_address(self, text: str) -> bool:
         """Check if text is an IP address"""
         ip_pattern = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'

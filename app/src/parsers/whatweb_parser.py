@@ -11,7 +11,7 @@ from datetime import datetime
 
 class WhatWebResult:
     """Result object for WhatWeb scans - compatible with CorvoScan's result handling"""
-    
+
     def __init__(self, tool_name, target, timestamp, raw_output, success, error_message=None, **kwargs):
         self.tool_name = tool_name
         self.target = target
@@ -19,11 +19,11 @@ class WhatWebResult:
         self.raw_output = raw_output
         self.success = success
         self.error_message = error_message
-        
+
         # Store additional data as attributes
         for key, value in kwargs.items():
             setattr(self, key, value)
-    
+
     def to_dict(self):
         """Convert to dictionary"""
         result = {
@@ -47,15 +47,15 @@ class WhatWebParser:
     def __init__(self):
         self.tool_name = "whatweb"
         self.raw_lines = []
-    
+
     def add_output_line(self, line: str):
         """Add a line of output from the tool"""
         self.raw_lines.append(line.rstrip())
-    
+
     def get_raw_output(self) -> str:
         """Get the complete raw output"""
         return "\n".join(self.raw_lines)
-    
+
     def clear(self):
         """Clear accumulated output"""
         self.raw_lines.clear()
@@ -63,24 +63,24 @@ class WhatWebParser:
     def parse(self, target: str) -> WhatWebResult:
         """
         Parse WhatWeb output and return structured results.
-        
+
         Args:
             target: Target URL that was scanned
-            
+
         Returns:
             WhatWebResult object with parsed results
         """
         raw_output = self.get_raw_output()
         lines = raw_output.strip().split('\n')
-        
+
         # Detect output format
         is_verbose = any('WhatWeb report for' in line for line in lines)
-        
+
         if is_verbose:
             parsed_data = self._parse_verbose(lines, target, raw_output)
         else:
             parsed_data = self._parse_standard(lines, target, raw_output)
-        
+
         # compute diagnostics and attach (reports for verbose, urls_scanned for standard)
         try:
             if parsed_data.get("format") == "verbose":
@@ -96,64 +96,64 @@ class WhatWebParser:
 
     def _parse_standard(self, lines: List[str], target: str, raw_output: str) -> Dict:
         """Parse standard (non-verbose) WhatWeb output"""
-        
+
         urls_scanned = []
-        
+
         # ANSI color code regex
         ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
-        
+
         for line in lines:
             # Skip empty lines
             if not line.strip():
                 continue
-            
+
             # Skip debug/status lines
             if line.startswith('DEBUG') or line.startswith('Started scan') or line.startswith('[SCAN COMPLETED]'):
                 continue
-            
+
             # Strip ANSI color codes
             line = ansi_escape.sub('', line)
-                
+
             # Each line is typically: URL [STATUS] Technologies, Info
             url_match = re.match(r'^(https?://[^\s\[]+)', line)
             if url_match:
                 url = url_match.group(1)
                 rest = line[len(url):].strip()
-                
+
                 # Extract status code
                 status_code = None
                 status_match = re.search(r'\[(\d{3})\s+([^\]]+)\]', rest)
                 if status_match:
                     status_code = int(status_match.group(1))
                     status_text = status_match.group(2)
-                
+
                 # Extract all technology/plugin mentions: Name[Version/Info]
                 technologies = []
                 tech_pattern = r'([A-Za-z0-9_-]+)\[([^\]]+)\]'
                 for match in re.finditer(tech_pattern, rest):
                     name = match.group(1)
                     info = match.group(2)
-                    
+
                     # Skip status codes
                     if name.isdigit():
                         continue
-                    
+
                     # Check if it looks like a technology
                     if len(name) > 1 and not name.startswith('http'):
                         technologies.append({
                             'name': name,
                             'info': info
                         })
-                
+
                 urls_scanned.append({
                     'url': url,
                     'status_code': status_code,
                     'status_text': status_text if status_match else None,
                     'technologies': technologies
                 })
-        
+
         success = len(urls_scanned) > 0
-        
+
         return {
             'tool_name': 'whatweb',
             'target': target,
@@ -167,28 +167,28 @@ class WhatWebParser:
 
     def _parse_verbose(self, lines: List[str], target: str, raw_output: str) -> Dict:
         """Parse verbose (-v) WhatWeb output"""
-        
+
         reports = []
         current_report = None
         current_plugin = None
         in_http_headers = False
         http_headers = []
-        
+
         # ANSI color code regex
         ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
-        
+
         i = 0
         while i < len(lines):
             line = lines[i]
-            
+
             # Strip ANSI color codes
             line = ansi_escape.sub('', line)
-            
+
             # Start of a new report
             if line.startswith('WhatWeb report for'):
                 if current_report:
                     reports.append(current_report)
-                
+
                 url_match = re.search(r'WhatWeb report for (.+)', line)
                 current_report = {
                     'url': url_match.group(1) if url_match else target,
@@ -204,44 +204,44 @@ class WhatWebParser:
                 }
                 in_http_headers = False
                 http_headers = []
-                
+
             # Status line
             elif line.startswith('Status'):
                 status_match = re.search(r'Status\s*:\s*(\d+)\s*(.+)?', line)
                 if status_match and current_report:
                     current_report['status_code'] = int(status_match.group(1))
                     current_report['status'] = status_match.group(2).strip() if status_match.group(2) else None
-            
+
             # Title
             elif line.startswith('Title'):
                 title_match = re.search(r'Title\s*:\s*(.+)', line)
                 if title_match and current_report:
                     current_report['title'] = title_match.group(1).strip()
-            
+
             # IP Address
             elif line.startswith('IP'):
                 ip_match = re.search(r'IP\s*:\s*([0-9.]+)', line)
                 if ip_match and current_report:
                     current_report['ip'] = ip_match.group(1)
-            
+
             # Country
             elif line.startswith('Country'):
                 country_match = re.search(r'Country\s*:\s*([^,]+),\s*(.+)', line)
                 if country_match and current_report:
                     current_report['country'] = country_match.group(1).strip()
                     current_report['country_code'] = country_match.group(2).strip()
-            
+
             # Summary
             elif line.startswith('Summary'):
                 summary_match = re.search(r'Summary\s*:\s*(.+)', line)
                 if summary_match and current_report:
                     current_report['summary'] = summary_match.group(1).strip()
-            
+
             # Detected Plugins section
             elif line.startswith('Detected Plugins:'):
                 # Start parsing plugins
                 pass
-            
+
             # Plugin name (starts with [)
             elif re.match(r'^\[\s*([^\]]+)\s*\]', line):
                 plugin_match = re.match(r'^\[\s*([^\]]+)\s*\]', line)
@@ -252,7 +252,7 @@ class WhatWebParser:
                         'strings': []
                     }
                     current_report['plugins'].append(current_plugin)
-            
+
             # Plugin description or string value
             elif current_plugin is not None and line.strip():
                 # Check if it's a String line
@@ -266,12 +266,12 @@ class WhatWebParser:
                         current_plugin['description'] += ' ' + line.strip()
                     else:
                         current_plugin['description'] = line.strip()
-            
+
             # HTTP Headers section
             elif line.startswith('HTTP Headers:'):
                 in_http_headers = True
                 current_plugin = None  # Stop parsing plugins
-            
+
             # Collect HTTP headers
             elif in_http_headers and line.strip():
                 # Check if we've reached the next report or end
@@ -282,17 +282,17 @@ class WhatWebParser:
                         current_report['http_headers'] = http_headers
                 else:
                     http_headers.append(line.strip())
-            
+
             i += 1
-        
+
         # Add the last report
         if current_report:
             if http_headers:
                 current_report['http_headers'] = http_headers
             reports.append(current_report)
-        
+
         success = len(reports) > 0
-        
+
         return {
             'tool_name': 'whatweb',
             'target': target,
@@ -306,7 +306,7 @@ class WhatWebParser:
 
     def format_results(self, result: WhatWebResult) -> str:
         """Format parsed results as HTML for display"""
-        
+
         if not result.success:
             return f"""
             <div style='color: #d32f2f; font-family: monospace; padding: 10px;'>
@@ -314,11 +314,11 @@ class WhatWebParser:
                 <br>Error: {result.error_message or 'Unknown error'}
             </div>
             """
-        
+
         # Convert result object to dict for easier access
         parsed = result.to_dict()
         format_type = parsed.get('format', 'standard')
-        
+
         if format_type == 'verbose':
             return self._format_verbose_results(parsed)
         else:
@@ -326,12 +326,12 @@ class WhatWebParser:
 
     def _format_standard_results(self, parsed: Dict) -> str:
         """Format standard output as HTML"""
-        
+
         html = f"""
         <div style='padding: 10px; background: #ffffff; color: #000000;'>
             <p><strong>URLs Scanned:</strong> {len(parsed.get('urls_scanned', []))}</p>
         """
-        
+
         for url_data in parsed.get('urls_scanned', []):
             status_code = url_data.get('status_code', 0)
             if status_code == 200:
@@ -340,32 +340,32 @@ class WhatWebParser:
                 status_color = '#f57c00'  # Orange
             else:
                 status_color = '#c62828'  # Red
-            
+
             html += f"""
             <div style='margin: 15px 0; padding: 12px; background: #ffffff; border-left: 4px solid {status_color}; border-radius: 3px; color: #000000;'>
                 <h4 style='color: #000000; margin-top: 0; margin-bottom: 8px;'>{url_data['url']}</h4>
                 <p style='margin: 5px 0;'><strong style='color: {status_color};'>[{url_data.get('status_code', 'N/A')} {url_data.get('status_text', '')}]</strong></p>
             """
-            
+
             if url_data.get('technologies'):
                 html += "<h5 style='color: #000000; margin-top: 10px; margin-bottom: 8px;'>Detected Technologies:</h5><ul style='list-style: none; padding-left: 0; margin: 0;'>"
                 for tech in url_data['technologies']:
                     html += f"<li style='margin: 4px 0; color: #000000;'>• <strong>{tech['name']}:</strong> {tech['info']}</li>"
                 html += "</ul>"
-            
+
             html += "</div>"
-        
+
         html += "</div>"
         return html
 
     def _format_verbose_results(self, parsed: Dict) -> str:
         """Format verbose output as HTML"""
-        
+
         html = f"""
         <div style='padding: 10px; background: #ffffff; color: #000000;'>
             <p><strong>Reports Generated:</strong> {len(parsed.get('reports', []))}</p>
         """
-        
+
         for report in parsed.get('reports', []):
             status_code = report.get('status_code', 0)
             if status_code == 200:
@@ -374,18 +374,18 @@ class WhatWebParser:
                 status_color = '#f57c00'  # Orange
             else:
                 status_color = '#c62828'  # Red
-            
+
             html += f"""
             <div style='margin: 15px 0; padding: 15px; background: #ffffff; border-left: 4px solid {status_color}; border-radius: 3px; color: #000000;'>
                 <h4 style='color: #000000; margin-top: 0;'>{report['url']}</h4>
-                
+
                 <table style='width: 100%; border-collapse: collapse; margin: 10px 0;'>
                     <tr>
                         <td style='padding: 8px; color: #000000; width: 120px;'><strong>Status:</strong></td>
                         <td style='padding: 8px; color: {status_color};'>[{status_code}] {report.get('status', 'N/A')}</td>
                     </tr>
             """
-            
+
             if report.get('title'):
                 html += f"""
                     <tr>
@@ -393,7 +393,7 @@ class WhatWebParser:
                         <td style='padding: 8px; color: #000000;'>{report['title']}</td>
                     </tr>
                 """
-            
+
             if report.get('ip'):
                 html += f"""
                     <tr>
@@ -401,7 +401,7 @@ class WhatWebParser:
                         <td style='padding: 8px; color: #000000;'>{report['ip']}</td>
                     </tr>
                 """
-            
+
             if report.get('country'):
                 html += f"""
                     <tr>
@@ -409,9 +409,9 @@ class WhatWebParser:
                         <td style='padding: 8px; color: #000000;'>{report['country']} ({report.get('country_code', 'N/A')})</td>
                     </tr>
                 """
-            
+
             html += "</table>"
-            
+
             # Summary
             if report.get('summary'):
                 html += f"""
@@ -420,29 +420,29 @@ class WhatWebParser:
                     <span>{report['summary']}</span>
                 </div>
                 """
-            
+
             # Detected Plugins
             if report.get('plugins'):
                 html += "<h5 style='color: #000000; margin-top: 15px;'>🔌 Detected Plugins & Technologies:</h5>"
-                
+
                 for plugin in report['plugins']:
                     html += f"""
                     <div style='margin: 10px 0; padding: 12px; background: #ffffff; border: 1px solid #e0e0e0; border-left: 3px solid #1565c0; border-radius: 3px; color: #000000;'>
                         <strong>{plugin['name']}</strong><br>
                     """
-                    
+
                     if plugin.get('description'):
                         desc = plugin['description'][:200] + ('...' if len(plugin['description']) > 200 else '')
                         html += f"<span style='font-size: 0.9em;'>{desc}</span><br>"
-                    
+
                     if plugin.get('strings'):
                         html += "<ul style='margin: 5px 0; padding-left: 20px; color: #000000;'>"
                         for string in plugin['strings']:
                             html += f"<li>{string}</li>"
                         html += "</ul>"
-                    
+
                     html += "</div>"
-            
+
             # HTTP Headers (collapsible or limited)
             if report.get('http_headers'):
                 header_count = len(report['http_headers'])
@@ -453,14 +453,14 @@ class WhatWebParser:
                 """
                 for header in report['http_headers'][:20]:  # Limit to first 20
                     html += f"<div style='color: #b0bec5; padding: 2px 0;'>{header}</div>"
-                
+
                 if header_count > 20:
                     html += f"<div style='color: #757575; padding: 5px 0;'><em>... and {header_count - 20} more headers</em></div>"
-                
+
                 html += "</div></details>"
-            
+
             html += "</div>"
-        
+
         html += "</div>"
         return html
 

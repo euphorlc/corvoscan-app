@@ -32,9 +32,9 @@ class WhatWebToolProcess(ToolProcessBase):
         "Verbose (-v)": "-v",
         # these flags require an '=' directly after the flag (e.g. --wait=0.5)
         "Follow redirects (--follow-redirect)": "--follow-redirect=",
-        "Max redirects (--max-redirects)": "--max-redirects=",       
+        "Max redirects (--max-redirects)": "--max-redirects=",
         "User-Agent (--user-agent)": "--user-agent=",   # requires a string and passed as --user-agent=VALUE
-        "Header (--header)": "--header",                      
+        "Header (--header)": "--header",
         "Max threads (--max-threads)": "--max-threads=",       # requires integer
         "Wait (--wait)": "--wait="                             # requires float/seconds, use '='
     }

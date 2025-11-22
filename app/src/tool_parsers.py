@@ -17,11 +17,11 @@ class NSLookupResult(ParsedResult):
     """Structured NSLookup results"""
     dns_records: List[DNSRecord] = None
     server_used: str = ""
-    
+
     def __post_init__(self):
         if self.dns_records is None:
             self.dns_records = []
-    
+
     def to_dict(self) -> Dict[str, Any]:
         result = super().to_dict()
         result['dns_records'] = [record.__dict__ for record in self.dns_records]
@@ -72,26 +72,26 @@ class FFUFResult(ParsedResult):
 
 class NSLookupParser(ToolResultsParser):
     """Parser for NSLookup output"""
-    
+
     def __init__(self):
         super().__init__("nslookup")
-    
+
     def parse(self, target: str) -> NSLookupResult:
         raw_output = self.get_raw_output()
         dns_records = []
         server_used = ""
-        
+
         current_record_type = ""
-        
+
         for line in self.raw_lines:
             line = line.strip()
-            
+
             # Extract DNS server
             if line.startswith("Server:"):
                 server_match = re.search(r'Server:\s+(.+)', line)
                 if server_match:
                     server_used = server_match.group(1)
-            
+
             # Record type headers
             if "IPv4 addresses" in line or line.endswith("A records"):
                 current_record_type = "A"
@@ -107,7 +107,7 @@ class NSLookupParser(ToolResultsParser):
                 current_record_type = "CNAME"
             elif "SOA" in line:
                 current_record_type = "SOA"
-            
+
             # Parse record values
             if current_record_type and line and not line.startswith(("Server:", "Address:", "Non-authoritative")):
                 # Skip lines that are headers or separators
@@ -120,10 +120,10 @@ class NSLookupParser(ToolResultsParser):
                             record_type=current_record_type,
                             value=value
                         ))
-        
+
         success = len(dns_records) > 0 and not self._has_errors()
         error_message = self._extract_error_message() if not success else None
-        
+
         return NSLookupResult(
             tool_name="nslookup",
             target=target,
@@ -134,7 +134,7 @@ class NSLookupParser(ToolResultsParser):
             dns_records=dns_records,
             server_used=server_used
         )
-    
+
     def _has_errors(self) -> bool:
         """Check for DNS resolution errors"""
         error_indicators = [
@@ -147,7 +147,7 @@ class NSLookupParser(ToolResultsParser):
         ]
         output = self.get_raw_output()
         return any(indicator in output for indicator in error_indicators)
-    
+
     def _extract_error_message(self) -> Optional[str]:
         for line in self.raw_lines:
             if any(error in line for error in ["can't find", "NXDOMAIN", "SERVFAIL"]):
@@ -160,10 +160,10 @@ class NSLookupParser(ToolResultsParser):
 
 # class WhatWebParser(ToolResultsParser):
 #     """Parser for WhatWeb output"""
-#     
+#
 #     def __init__(self):
 #         super().__init__("whatweb")
-#     
+#
 #     def parse(self, target: str) -> WhatWebResult:
 #         raw_output = self.get_raw_output()
 #         technologies = []
@@ -171,16 +171,16 @@ class NSLookupParser(ToolResultsParser):
 #         server = ""
 #         ip_address = ""
 #         url = target
-#         
+#
 #         # Parse WhatWeb output (assuming standard format)
 #         for line in self.raw_lines:
 #             line = line.strip()
-#             
+#
 #             # Extract status code
 #             status_match = re.search(r'\[(\d{3})\]', line)
 #             if status_match:
 #                 status_code = int(status_match.group(1))
-#             
+#
 #             # Extract technologies (format: Name[Version])
 #             tech_matches = re.findall(r'([A-Za-z0-9_-]+)(?:\[([^\]]*)\])?', line)
 #             for name, version in tech_matches:
@@ -189,21 +189,21 @@ class NSLookupParser(ToolResultsParser):
 #                         name=name,
 #                         version=version or ""
 #                     ))
-#             
+#
 #             # Extract server information
 #             if "Server:" in line:
 #                 server_match = re.search(r'Server:\s*([^\s,]+)', line)
 #                 if server_match:
 #                     server = server_match.group(1)
-#             
+#
 #             # Extract IP address
 #             ip_match = re.search(r'\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b', line)
 #             if ip_match:
 #                 ip_address = ip_match.group(1)
-#         
+#
 #         success = status_code > 0 and not self._has_errors()
 #         error_message = self._extract_error_message() if not success else None
-#         
+#
 #         return WhatWebResult(
 #             tool_name="whatweb",
 #             target=target,
@@ -217,12 +217,12 @@ class NSLookupParser(ToolResultsParser):
 #             server=server,
 #             ip_address=ip_address
 #         )
-#     
+#
 #     def _has_errors(self) -> bool:
 #         error_indicators = ["ERROR", "failed", "timeout", "unable to connect"]
 #         output = self.get_raw_output().lower()
 #         return any(indicator in output for indicator in error_indicators)
-#     
+#
 #     def _extract_error_message(self) -> Optional[str]:
 #         for line in self.raw_lines:
 #             if any(error in line.lower() for error in ["error", "failed", "timeout"]):

@@ -29,7 +29,7 @@ class FFUFToolProcess(ToolProcessBase):
         "Follow redirects": "-r",
         "Ignore SSL": "-k",
         "Custom matcher": "-m",        # Requires matcher string (value)
-        
+
     }
 
     # optional fallback defaults if UI path not provided

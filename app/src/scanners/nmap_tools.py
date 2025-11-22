@@ -44,10 +44,10 @@ param_map = {
 }
 
 class NmapToolProcess(ToolProcessBase):
-    
+
 # These scan types require root privileges
     root_required_flags = {"-sS", "-sU", "-O", "-sF", "-sX", "-sN", "--traceroute"}  # -A removed
-    
+
     def __init__(self, target, params):
         super().__init__("nmap", target, params)
         self.process = None
@@ -67,7 +67,7 @@ class NmapToolProcess(ToolProcessBase):
                 flag = self.param_map.get(p)
                 if flag:
                     flags.append(flag)
-        
+
         # Check if any flag requires root privileges
         return any(flag in self.root_required_flags for flag in flags)
 
@@ -83,9 +83,9 @@ class NmapToolProcess(ToolProcessBase):
                 flag = self.param_map.get(p)
                 if flag:
                     flags.append(flag)
-        
+
         base_command = ["nmap"] + flags + [self.target]
-        
+
         # Add sudo if root privileges are needed and we're not already root
         if self.needs_root() and os.geteuid() != 0:
             # use -S to read password from stdin and -p "" to suppress prompt text
