@@ -63,3 +63,16 @@ chmod +x corvo.sh
 
 -   GUI not appearing? Ensure your Docker Desktop has "Allow access to default file location" enabled.
 -   Network errors? The container runs in --net=host mode on Linux/WSL. On macOS, it uses the standard bridge; some SYN scans (nmap -sS) may require root privileges inside the container (not currently supported for security).
+
+## 🛠️ Development
+To contribute code without rebuilding the Docker image every time:
+
+
+1. Ensure you are on **Linux** or **WSL2**
+2. Run the dev script:
+```bash
+chmod +x dev.sh
+./dev.sh
+```
+This mounts your local `app/` folder into the container. When changes are made, close the app GUI and restart the script.
+
