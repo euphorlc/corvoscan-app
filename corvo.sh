@@ -3,7 +3,7 @@
 # CorvoScan Universal Launcher
 # Supports: WSL2 (Windows), Native Linux, and MacOS (Intel/M-Series)
 
-APP_NAME="euphorlc/corvoscan:latest"
+APP_NAME="euphorlc/corvoscan-app:latest"
 CONTAINER_NAME="corvoscan_instance"
 OUTPUT_DIR="$(pwd)/output"
 RULES_DIR="$(pwd)/rulesets"
@@ -57,6 +57,23 @@ elif [[ "$KERNEL_NAME" == "Linux" ]]; then
     if command -v xhost &> /dev/null; then
         xhost +local:docker > /dev/null 2>&1
     fi
+fi
+
+echo "[-] Checking for image updates..."
+
+if ! docker pull "$APP_NAME"; then
+    echo "[!] Warning: Could not reach Docker Hub."
+
+    if [[ "$(docker images -q $APP_NAME 2> /dev/null)" == "" ]]; then
+        echo "[!] FATAL: No local image found and no internet connection."
+        echo "[!] Cannot launch application."
+        exit 1
+    else
+        echo "[-] Starting with existing local version (Offline Mode)."
+    fi
+
+else
+    echo "[-] Application is up to date."
 fi
 
 echo "[-] Launching $APP_NAME..."
