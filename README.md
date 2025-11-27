@@ -24,7 +24,7 @@ You do **not** need to build the Docker image manually. The launcher script will
 
 ```bash
 git clone https://github.com/euphorlc/corvoscan-app.git
-cd corvo-app
+cd corvoscan-app
 ```
 
 #### 2. Run the Application
@@ -36,20 +36,6 @@ We provide a universal launcher that automatically detects your OS, configures X
 chmod +x corvo.sh
 
 # Launch
-./corvo.sh
-```
-
-## Usage
-
-#### Launching the App
-
-We provide a universal launcher that handles X11 forwarding and volume mounting automatically.
-
-```bash
-# Make executable (first time only)
-chmod +x corvo.sh
-
-# Run
 ./corvo.sh
 ```
 
@@ -68,7 +54,15 @@ If you want to contribute to CorvoScan, you can use our "Hot Reload" mode to see
 #### Dev Mode
 
 1. Ensure you are on **Linux** or **WSL2**
-2. Run the dev script:
+2. Clone the CorvoScan GitHub repository:
+```bash
+git clone https://github.com/euphorlc/corvoscan-app.git
+```
+3. Build the development image:
+```bash
+docker build -t corvoscan-app:dev .
+```
+4. Run the dev script:
 ```bash
 chmod +x dev.sh
 ./dev.sh

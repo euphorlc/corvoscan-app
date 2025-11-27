@@ -9,7 +9,7 @@
 # - Configures X11/WSLg for GUI
 # - Runs on Host Network for full tool access
 
-APP_NAME="corvoscan:final"
+APP_NAME="corvoscan-app:dev"
 CONTAINER_NAME="corvoscan_dev"
 SOURCE_DIR="$(pwd)/app"
 OUTPUT_DIR="$(pwd)/output"
@@ -50,6 +50,8 @@ fi
 docker run -it --rm \
     --name "$CONTAINER_NAME" \
     --net=host \
+    --cap-add=NET_RAW \
+    --cap-add=NET_ADMIN \
     -e DISPLAY="$DISPLAY_VAR" \
     -e QT_DEBUG_PLUGINS=1 \
     $MOUNT_ARGS \
