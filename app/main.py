@@ -35,10 +35,6 @@ from PyQt6.QtGui import QCursor
 from PyQt6.QtGui import QTextDocument
 from PyQt6.QtPrintSupport import QPrinter
 
-# === Import Custom Modules ===
-# from src.tool_manager import ToolManager
-# from src.ruleset_manager import RulesetManager
-
 from src.scan_handler import ScanHandler
 from src.popup_utils import (
     show_error_popup,
@@ -619,6 +615,12 @@ class ToolNameBox(QFrame):
         ordered_params = (
             required_fields + standalone_group + modifier_group + other_group
         )
+        # expose the final rendered parameter order so callers (HelloWindow) can map
+        # saved checked-flag lists back to the correct parameter names.
+        try:
+            self._rendered_param_order = list(ordered_params)
+        except Exception:
+            self._rendered_param_order = list(parameters)
 
         # helper to find the original index for a parameter (handles duplicates by tracking used indices)
         used_indices = set()
@@ -999,149 +1001,103 @@ class ToolNameBox(QFrame):
                     # Preserve helpful placeholders/tooltips from previous logic
                     if "Timing template" in param:
                         le.setPlaceholderText("0-5 (e.g., 4 for aggressive)")
-                        le.setToolTip(
-                            "Timing templates:\nT0=Paranoid (very slow)\nT1=Sneaky (slow)\nT2=Polite (slow)\nT3=Normal (default)\nT4=Aggressive (fast, recommended)\nT5=Insane (very fast)"
-                        )
+                        # le.setToolTip("Timing templates:\nT0=Paranoid (very slow)\nT1=Sneaky (slow)\nT2=Polite (slow)\nT3=Normal (default)\nT4=Aggressive (fast, recommended)\nT5=Insane (very fast)")
                     elif "Custom port range" in param:
                         le.setPlaceholderText("e.g., 80,443 or 1-1000")
-                        le.setToolTip(
-                            "Specify ports: single (80), multiple (80,443,8080), or range (1-1000)"
-                        )
+                        # le.setToolTip("Specify ports: single (80), multiple (80,443,8080), or range (1-1000)")
                     elif param == "Host Timeout":
                         le.setPlaceholderText("e.g., 30s, 2m, 1h")
-                        le.setToolTip(
-                            "Timeout for each host: seconds (30s), minutes (2m), hours (1h)"
-                        )
+                        # le.setToolTip("Timeout for each host: seconds (30s), minutes (2m), hours (1h)")
                     elif "XML Output" in param:
                         le.setPlaceholderText("filename.xml")
-                        le.setToolTip("Output file name for XML results")
+                    # le.setToolTip("Output file name for XML results")
                     elif param == "WHOIS server (-h)":
                         le.setPlaceholderText(
                             "whois.verisign-grs.com (leave blank for auto-detect)"
                         )
-                        le.setToolTip(
-                            "Custom whois server hostname. Leave blank to automatically detect the appropriate server."
-                        )
+                        # le.setToolTip("Custom whois server hostname. Leave blank to automatically detect the appropriate server.")
                     elif param == "Port (-p)":
                         le.setPlaceholderText("43 (leave blank for default)")
-                        le.setToolTip(
-                            "Whois server port number. Leave blank to use default port 43."
-                        )
+                    # le.setToolTip("Whois server port number. Leave blank to use default port 43.")
                     elif param == "Inverse attribute search (-i ATTR)":
                         le.setPlaceholderText("e.g., email or nic-hdl")
-                        le.setToolTip(
-                            "Inverse attribute to search for (attribute name or value). Example: 'email' or 'nic-hdl'."
-                        )
+                    # le.setToolTip("Inverse attribute to search for (attribute name or value). Example: 'email' or 'nic-hdl'.")
                     elif param == "Object type (-T TYPE)":
                         le.setPlaceholderText("e.g., domain, person, role")
-                        le.setToolTip(
-                            "Restrict query to a specific object type (domain, person, role, etc.)."
-                        )
+                    # le.setToolTip("Restrict query to a specific object type (domain, person, role, etc.).")
                     # DNSEnum-specific placeholders/tooltips
                     elif param == "DNS server (--dnsserver <IP>)":
                         le.setPlaceholderText("e.g., 8.8.8.8")
-                        le.setToolTip(
-                            "IP address of the DNS server to query (IPv4 or IPv6)."
-                        )
+                        # le.setToolTip("IP address of the DNS server to query (IPv4 or IPv6).")
                     elif param == "Concurrency (-p <n>)":
                         le.setPlaceholderText("e.g., 10")
-                        le.setToolTip(
-                            "Limit number of concurrent DNS queries (integer)."
-                        )
+                    # le.setToolTip("Limit number of concurrent DNS queries (integer).")
                     # Harvester-specific placeholders/tooltips
                     elif param == "Limit (-l, --limit)":
                         le.setPlaceholderText("e.g., 100")
-                        le.setToolTip(
-                            "Maximum number of results to return from the selected source (integer)."
-                        )
+                    # le.setToolTip("Maximum number of results to return from the selected source (integer).")
                     elif param == "Start result (-S, --start)":
                         le.setPlaceholderText("e.g., 0")
-                        le.setToolTip(
-                            "Result offset (zero-based) to start returning results from."
-                        )
+                    # le.setToolTip("Result offset (zero-based) to start returning results from.")
                     elif param == "DNS server (-e, --dns-server)":
                         le.setPlaceholderText("e.g., 8.8.8.8")
-                        le.setToolTip(
-                            "DNS server IP address to use for DNS queries (optional)."
-                        )
+                    # le.setToolTip("DNS server IP address to use for DNS queries (optional).")
                     # WhatWeb-specific placeholders/tooltips (match whatweb_tool.py labels)
                     elif param == "User-Agent (--user-agent)":
                         le.setPlaceholderText("Custom User-Agent string")
-                        le.setToolTip(
-                            "Set the User-Agent header for requests (helps evade basic blocks)."
-                        )
+                    # le.setToolTip("Set the User-Agent header for requests (helps evade basic blocks).")
                     elif param == "Follow redirects (--follow-redirect)":
                         le.setPlaceholderText("always | same-origin | never")
-                        le.setToolTip(
-                            "Follows redirects — may increase number of requests."
-                        )
+                    # le.setToolTip("Follows redirects — may increase number of requests.")
                     elif param == "Max redirects (--max-redirects)":
                         le.setPlaceholderText("e.g., 5")
-                        le.setToolTip(
-                            "Maximum number of redirects to follow when following redirects."
-                        )
+                    #  le.setToolTip("Maximum number of redirects to follow when following redirects.")
                     elif param == "Wait (--wait)":
                         le.setPlaceholderText("0.5 (seconds) — conservative default")
-                        le.setToolTip(
-                            "Delay between requests in seconds. Larger waits reduce detection risk."
-                        )
+                    #  le.setToolTip("Delay between requests in seconds. Larger waits reduce detection risk.")
                     elif param == "Max threads (--max-threads)":
                         le.setPlaceholderText("4 (recommended conservative default)")
-                        le.setToolTip(
-                            "Max concurrent threads. Higher values are faster but increase chance of detection."
-                        )
+                    # le.setToolTip("Max concurrent threads. Higher values are faster but increase chance of detection.")
                     elif param == "Aggressiveness (1-4)":
                         le.setPlaceholderText("1-4 (1=passive, 4=aggressive)")
-                        le.setToolTip(
-                            "Aggression level: 1=passive, 2=polite, 3=normal, 4=aggressive"
-                        )
+                    # le.setToolTip("Aggression level: 1=passive, 2=polite, 3=normal, 4=aggressive")
                     elif param == "Custom matcher":
                         le.setPlaceholderText("e.g., status:403")
-                        le.setToolTip("Custom matching rules for responses")
+                    #  le.setToolTip("Custom matching rules for responses")
                     elif param == "Size filter":
                         le.setPlaceholderText("e.g., 100,200-400")
-                        le.setToolTip("Filter by response size")
+                    # le.setToolTip("Filter by response size")
                     elif param == "Time filter":
                         le.setPlaceholderText("e.g., 1s, 2m")
-                        le.setToolTip("Filter by response time")
+                    #  le.setToolTip("Filter by response time")
                     elif param == "Regex filter":
                         le.setPlaceholderText("e.g., ^Admin|^Login")
-                        le.setToolTip("Regular expression to match against response")
+                    # le.setToolTip("Regular expression to match against response")
                     elif param == "Filter code":
                         le.setPlaceholderText("e.g., 403,404")
-                        le.setToolTip(
-                            "Comma-separated HTTP response codes to filter (e.g., 403,404). Responses matching these codes will be filtered."
-                        )
+                    # le.setToolTip("Comma-separated HTTP response codes to filter (e.g., 403,404). Responses matching these codes will be filtered.")
                     elif param == "Header fuzz":
                         le.setPlaceholderText("e.g., X-Forwarded-For: 127.0.0.1")
-                        le.setToolTip(
-                            "HTTP header(s) to send/fuzz. Use 'Header: Value' syntax."
-                        )
+                    # le.setToolTip("HTTP header(s) to send/fuzz. Use 'Header: Value' syntax.")
                     elif param == "POST fuzz":
                         le.setPlaceholderText("e.g., username=admin&password=")
-                        le.setToolTip("Data to send in POST requests")
+                    # le.setToolTip("Data to send in POST requests")
                     elif param == "GET fuzz":
                         le.setPlaceholderText("e.g., ?id=1")
-                        le.setToolTip("Query parameters to append to URLs")
+                    # le.setToolTip("Query parameters to append to URLs")
                     # FFUF-specific placeholders/tooltips (new additions)
                     elif param == "Status codes":
                         le.setPlaceholderText("e.g., 200,301,302")
-                        le.setToolTip(
-                            "Comma-separated HTTP status codes to match (e.g., 200,301)."
-                        )
+                    #  le.setToolTip("Comma-separated HTTP status codes to match (e.g., 200,301).")
                     elif param == "Extension fuzz":
                         le.setPlaceholderText("e.g., .php,.html or php,html")
-                        le.setToolTip(
-                            "Comma-separated file extensions to try (e.g., .php,.html)."
-                        )
+                    #  le.setToolTip("Comma-separated file extensions to try (e.g., .php,.html).")
                     elif param == "Depth limit":
                         le.setPlaceholderText("e.g., 3")
-                        le.setToolTip("Maximum recursion depth for fuzzing (integer).")
+                    #  le.setToolTip("Maximum recursion depth for fuzzing (integer).")
                     elif param == "Rate limit":
                         le.setPlaceholderText("e.g., 100")
-                        le.setToolTip(
-                            "Limit request rate (requests per second or as supported by ffuf)."
-                        )
+                    # le.setToolTip("Limit request rate (requests per second or as supported by ffuf).")
                     else:
                         le.setPlaceholderText("Enter value")
                     self.params_layout.addWidget(le)
@@ -1262,7 +1218,8 @@ class HelloWindow(QWidget):
                 "description": "DNSEnum: Enumerate DNS records.",
                 "parameters": [
                     "Basic run",
-                    "Verbose output (-v)" "Skip PTR (--noreverse)",
+                    "Verbose output (-v)",
+                    "Skip PTR (--noreverse)",
                     "Enable brute force",  # NEW: when checked, dnsenum will perform brute-force (no automatic -f emptywordlist)
                     "DNS server (--dnsserver <IP>)",
                     # "Concurrency (-p <n>)",  # COMMENTED OUT: removed from UI options
@@ -1832,6 +1789,8 @@ class HelloWindow(QWidget):
         except Exception:
             pass
 
+        # Network monitor removed per user request
+
     def on_terminal_ready(self):
         # Suppress the automatic "terminal ready" message.
         # No action required when the embedded terminal finishes loading.
@@ -2294,9 +2253,6 @@ class HelloWindow(QWidget):
         # route preview to the tool tab
         self.send_to_terminal(tool_key, f"$ {command_preview}\r\n")
 
-        # Check if sudo is needed
-        # Command preview may not start with "sudo " exactly, so detect presence instead
-
         # Start scan with the final parameters (includes Wordlist tuple if provided)
         # Clear the parser state for this tool to prevent accumulation from previous scans
         if tool_key in self.results_manager.parsers:
@@ -2321,14 +2277,20 @@ class HelloWindow(QWidget):
                 show_error_popup(self, "Please enter a domain before scanning.")
                 return
 
-            # Save the current visible tool state (checked flags + any input values)
+            # Persist any changes the user made in the currently-visible tool
+            # so Scan All uses the up-to-date checkboxes and input values.
             try:
-                if getattr(self, "current_tool", None):
-                    # persist checked flags for the currently-displayed tool
-                    self.checked_params[self.current_tool] = (
-                        self.tool_name_box.get_checked()
-                    )
-                    # persist any live input values from the right-side UI
+                # Save the checked flags from the visible ToolNameBox
+                if getattr(self, "current_tool", None) and getattr(
+                    self, "tool_name_box", None
+                ):
+                    try:
+                        self.checked_params[self.current_tool] = (
+                            self.tool_name_box.get_checked()
+                        )
+                    except Exception:
+                        pass
+                    # Persist any widget values (FFUF textbox, combos, line edits, etc.)
                     try:
                         self._save_current_tool_values()
                     except Exception:
@@ -2361,7 +2323,8 @@ class HelloWindow(QWidget):
                     tool_label, [False] * len(params_defs)
                 )
                 params_list = []
-                # choose required/optional lists for validation
+                saved = self.stored_param_values.get(tool_label, {}) or {}
+                # choose required/optional lists for validation (mirror handle_start_scan)
                 current_value_required = []
                 current_value_optional = []
                 if tool_key == "whois":
@@ -2369,97 +2332,56 @@ class HelloWindow(QWidget):
                     current_value_optional = whois_value_optional
                 elif tool_key == "whatweb":
                     current_value_required = whatweb_value_required
+                    current_value_optional = []
                 elif tool_key == "nmap":
                     current_value_required = nmap_value_required
+                    current_value_optional = []
                 elif tool_key == "ffuf":
                     current_value_required = ffuf_value_required
+                    current_value_optional = []
                 elif tool_key == "theharvester":
                     current_value_required = theharvester_value_required
+                    current_value_optional = []
                 elif tool_key == "dnsenum":
                     current_value_required = dnsenum_value_required
 
-                # retrieve previously-saved user-entered values for this tool (including current tool just saved above)
-                saved_vals = self.stored_param_values.get(tool_label, {}) or {}
-
-                # Map checked flags by the rendered right-side order (saved in __param_order__) to avoid index mismatch
-                saved_order = saved_vals.get("__param_order__")
-                checked_by_name = {}
-                try:
-                    if (
-                        saved_order
-                        and isinstance(saved_order, list)
-                        and len(checked_flags) == len(saved_order)
-                    ):
-                        checked_by_name = {
-                            saved_order[i]: bool(checked_flags[i])
-                            for i in range(len(saved_order))
-                        }
-                    elif len(checked_flags) == len(params_defs):
-                        checked_by_name = {
-                            params_defs[i]: bool(checked_flags[i])
-                            for i in range(len(params_defs))
-                        }
-                    else:
-                        checked_by_name = {}
-                except Exception:
-                    checked_by_name = {}
-
-                # Build params_list consulting checked_by_name (name-based) to match UI ordering
-                for name in params_defs:
-                    if not checked_by_name.get(name, False):
+                for idx, flag in enumerate(checked_flags):
+                    if not flag:
+                        continue
+                    name = params_defs[idx] if idx < len(params_defs) else None
+                    if not name:
                         continue
 
+                    # If this parameter accepts a value, attempt to include stored value
                     if name in current_value_required or name in current_value_optional:
-                        val = saved_vals.get(name, "") or ""
-                        if tool_key == "ffuf" and not val:
-                            val = saved_vals.get("__ffuf_top_input__", "") or ""
-                        if (
-                            tool_key == "theharvester"
-                            and name == "[REQUIRED] Source (-b, --source)"
-                            and not val
-                        ):
-                            val = saved_vals.get(name, "") or ""
-
-                        if name in current_value_required:
-                            if not val:
+                        val = saved.get(name, "") or ""
+                        if val:
+                            params_list.append((name, val))
+                        else:
+                            # required and missing -> cannot proceed
+                            if name in current_value_required:
                                 missing_required.append(f"{tool_label}: {name}")
-                                continue
-                            else:
-                                params_list.append((name, val))
+                            # optional & missing -> skip it
                     else:
+                        # plain flag (no value) -> include label name
                         params_list.append(name)
 
-                # --- NEW: mirror single-run behavior for theHarvester ---
-                if tool_key == "theharvester":
-                    src_name = "[REQUIRED] Source (-b, --source)"
-                    # detect if source already present in params_list (tuple or plain)
-                    has_src = any(
-                        (isinstance(p, tuple) and p[0] == src_name) or (p == src_name)
-                        for p in params_list
-                    )
-                    if not has_src:
-                        src_val = saved_vals.get(src_name, "") or ""
-                        if src_val:
-                            # inject saved source even when other flags are selected so multi-run command matches single-run
-                            params_list.insert(0, (src_name, src_val))
-                        else:
-                            # preserve previous behavior: only treat missing required if nothing else was selected
-                            if not params_list:
-                                missing_required.append(f"{tool_label}: {src_name}")
-                # --- END NEW ---
-
-                # If ffuf has a stored top input and current tool is FFUF, include it (priority first)
+                # If ffuf has a stored top input and current tool is FFUF and textbox exists in UI, include it
                 if tool_key == "ffuf":
-                    ffuf_top = saved_vals.get("__ffuf_top_input__", "") or ""
-                    if ffuf_top:
-                        # remove any existing Wordlist tuple to avoid duplicates
-                        params_list = [
-                            p
-                            for p in params_list
-                            if not (isinstance(p, tuple) and p[0] == "Wordlist")
-                        ]
-                        params_list.insert(0, ("Wordlist", ffuf_top))
-
+                    ffuf_val = ""
+                    # visible widget wins (only present when FFUF is the current tool)
+                    try:
+                        ffuf_input = getattr(self.tool_name_box, "ffuf_top_input", None)
+                        if ffuf_input and ffuf_input.text().strip():
+                            ffuf_val = ffuf_input.text().strip()
+                    except Exception:
+                        ffuf_val = ""
+                    # fallback to stored values (persisted earlier via _save_current_tool_values)
+                    if not ffuf_val:
+                        saved = self.stored_param_values.get(tool_label) or {}
+                        ffuf_val = (saved.get("__ffuf_top_input__", "") or "").strip()
+                    if ffuf_val:
+                        params_list.insert(0, ("Wordlist", ffuf_val))
                 parameters[tool_key] = params_list
 
                 # create preview to check sudo hints
@@ -4875,8 +4797,6 @@ class QuickTooltipFilter(QObject):
 # --- Main Application Entry Point ---
 if __name__ == "__main__":
     # --- Application Startup ---
-    # tool = ToolManager()
-    # ruleset = RulesetManager()
     app = QApplication(sys.argv)
     window = HelloWindow()
     window.show()

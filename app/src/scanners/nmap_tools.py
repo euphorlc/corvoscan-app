@@ -20,10 +20,13 @@ standalone_flags = [
     "Ping scan (-sn)",
     "Script scan (-sC)",
     "Traceroute (--traceroute)",
+    "Custom port range (-p)",
 ]
 
 # Modifier flags (exact strings must match main.py's tools_data)
-modifier_flags = ["Timing template (-T0-5)", "Custom port range (-p)"]
+modifier_flags = [
+    "Timing template (-T0-5)",
+]
 
 # Basic param_map for building commands (map UI label -> nmap flag)
 param_map = {
@@ -59,23 +62,6 @@ class NmapToolProcess(ToolProcessBase):
         self.process = None
         # ensure instance methods referencing self.param_map work
         self.param_map = param_map
-
-    def needs_root(self):
-        """Check if the current scan configuration requires root privileges"""
-        flags = []
-        for p in self.params:
-            if isinstance(p, tuple):
-                name, value = p
-                flag = self.param_map.get(name)
-                if flag:
-                    flags.append(flag)
-            else:
-                flag = self.param_map.get(p)
-                if flag:
-                    flags.append(flag)
-
-        # Check if any flag requires root privileges
-        return any(flag in self.root_required_flags for flag in flags)
 
     def build_command(self):
         flags = []

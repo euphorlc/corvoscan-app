@@ -1,67 +1,44 @@
 from .tool_process_base import ToolProcessBase
 
 # Parameters that require values and cannot be blank
+# value_required: parameters that must have a value when selected (empty here)
 value_required = []
 
 # Parameters that can have values but are optional (can be left blank)
+# value_optional: parameters that accept a value but can be left blank (UI will show input)
 value_optional = [
-    "WHOIS server (-h)",           # Optional - leave blank for auto-detect
-    "Port (-p)",                   # Optional - leave blank for default port 43
-    # "Inverse attribute search (-i ATTR)",  # commented out: hide from UI but kept for reference
-    # "Object type (-T TYPE)"        # commented out: hide from UI but kept for reference
+    "WHOIS server (-h)",  # optional: leave blank to auto-detect
+    "Port (-p)",  # optional: leave blank to use default port 43
 ]
 
+# Flags that represent standalone query options (can be used by themselves with a target)
+# Standalone flags (presence only) — keys must match UI labels
+standalone_flags = [
+    "Default scan",  # no-op option
+    "WHOIS server (-h)",
+    "Port (-p)",
+    "Display referral chain (-I)",
+    "Suppress legal disclaimers (-H)",
+    "Verbose output (--verbose)",
+]
+
+# Modifier flags that only change behavior/output
+# Modifier flags (toggle-like) mapping to actual short flags
+modifier_flags = {"Suppress legal disclaimers (-H)": "-H"}
+
+# Combined mapping used when building commands
+# Mapping from UI label -> actual whois flag (used by ToolProcessBase/build)
+param_map = {
+    "Default scan": "",  # explicit no-op
+    "WHOIS server (-h)": "-h",
+    "Port (-p)": "-p",
+    "Display referral chain (-I)": "-I",
+    "Suppress legal disclaimers (-H)": "-H",
+    "Verbose output (--verbose)": "--verbose",
+}
+
+
 class WhoisToolProcess(ToolProcessBase):
-    # Flags that represent standalone query options (can be used by themselves with a target)
-    # Moved -I, -r, -B here so they act as standalone flags (presence toggles behavior).
-    # Verbose (--verbose) is intentionally a standalone toggle as requested.
-    standalone_flags = [
-        "Default scan",                # no-op default; checking this adds no flag to the command
-        "WHOIS server (-h)",
-        "Port (-p)",
-        # "Inverse attribute search (-i ATTR)", # commented out: hide from UI but keep reference
-        # "Object type (-T TYPE)", # commented out: hide from UI but keep reference
-        # "Exact match only (-x)",     # commented out per request
-        "Display referral chain (-I)",
-        # "Query all objects (-a)",    # commented out per request
-        # "Disable recursion (-r)",              # commented out: hide from UI but keep reference
-        # "Disable contact data filtering (-B)", # commented out: hide from UI but keep reference
-        "Verbose output (--verbose)",
-        # "Show client version (-V)"  # deprecated/commented out per request
-    ]
-
-    # Modifier flags that only change behavior/output
-    # Keep only true modifiers here (e.g. -H)
-    modifier_flags = {
-        "Suppress legal disclaimers (-H)": "-H",
-    }
-
-    # Flags that require a user-supplied value (kept for UI validation)
-    value_required_flags = {
-        "WHOIS server (-h)": "-h",
-        "Port (-p)": "-p",
-        # "Inverse attribute search (-i ATTR)": "-i",  # commented out: hide but keep reference
-        # "Object type (-T TYPE)": "-T",               # commented out: hide but keep reference
-    }
-
-    # Combined mapping used when building commands
-    param_map = {
-        "Default scan": "",                            # explicit no-op mapping
-        "WHOIS server (-h)": "-h",                      # requires user input (server host/IP)
-        "Port (-p)": "-p",                              # requires user input (port number)
-        "Display referral chain (-I)": "-I",
-        # "Query all objects (-a)": "-a",                 # commented out per request
-        # "Disable recursion (-r)": "-r",                # commented out: hide from UI but keep reference
-        # "Inverse attribute search (-i ATTR)": "-i",    # commented out: hide from UI but keep reference
-        # "Object type (-T TYPE)": "-T",                 # commented out: hide from UI but keep reference
-        # "Disable contact data filtering (-B)": "-B",   # commented out: hide from UI but keep reference
-        # "Exact match only (-x)": "-x",                 # commented out per request
-
-        "Verbose output (--verbose)": "--verbose",
-        "Suppress legal disclaimers (-H)": "-H",
-        # "Show client version (-V)": "-V"  # commented/deprecated
-    }
-
     def __init__(self, target, params):
         # use exact tool name without trailing spaces
         super().__init__("whois", target, params)
@@ -71,11 +48,11 @@ class WhoisToolProcess(ToolProcessBase):
         for p in self.params:
             if isinstance(p, tuple):
                 name, value = p
-                flag = self.param_map.get(name)
+                flag = param_map.get(name)
                 if flag:
                     flags.extend([flag, value])
             else:
-                flag = self.param_map.get(p)
+                flag = param_map.get(p)
                 if flag:
                     flags.append(flag)
         return ["whois"] + flags + [self.target]

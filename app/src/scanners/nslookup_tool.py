@@ -8,11 +8,12 @@ standalone_flags = [
     "Nameservers (NS)",
     "Start of Authority (SOA)",
     "TXT records (TXT)",
-    "Canonical names (CNAME)"
+    "Canonical names (CNAME)",
 ]
 
 # NSLookup has no modifiers; keep empty list exported at module level for clarity
 modifier_flags = []
+
 
 class NSLookupToolProcess(ToolProcessBase):
     # These NSLookup query types are standalone (each is a complete query type)
@@ -23,7 +24,7 @@ class NSLookupToolProcess(ToolProcessBase):
         "Nameservers (NS)",
         "Start of Authority (SOA)",
         "TXT records (TXT)",
-        "Canonical names (CNAME)"
+        "Canonical names (CNAME)",
     ]
 
     # NSLookup has few modifiers; keep empty list for clarity
@@ -36,7 +37,7 @@ class NSLookupToolProcess(ToolProcessBase):
         "Nameservers (NS)": "-type=NS",
         "Start of Authority (SOA)": "-type=SOA",
         "TXT records (TXT)": "-type=TXT",
-        "Canonical names (CNAME)": "-type=CNAME"
+        "Canonical names (CNAME)": "-type=CNAME",
     }
 
     def __init__(self, target, params):

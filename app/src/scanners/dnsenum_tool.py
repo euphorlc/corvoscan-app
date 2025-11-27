@@ -3,35 +3,37 @@ import os
 
 # Parameters that require values (UI will show input fields)
 value_required = [
-    "DNS server (--dnsserver <IP>)",     # UI label -> maps to --dnsserver
+    "DNS server (--dnsserver <IP>)",  # UI label -> maps to --dnsserver
     # "Concurrency (-p <n>)"               # COMMENTED OUT: removed from UI options
 ]
 
 # Standalone vs modifier lists must match the UI strings in main.py
 standalone_flags = [
-    "Basic run",            # shortened label for default/basic run
-    "Verbose output (-v)"   # normalized label (match main.py)
+    "Basic run",  # shortened label for default/basic run
+    "Verbose output (-v)",  # normalized label (match main.py)
+    "Skip PTR (--noreverse)",
 ]
 
 modifier_flags = [
-    "Skip PTR (--noreverse)",          # descriptive label for --noreverse
-    "DNS server (--dnsserver <IP>)",   # shortened/descriptive
-    "Enable brute force",              # NEW: when enabled, do not pass automatic -f empty wordlist
-    #"-o <output.xml> (save results in XML)",
+    # descriptive label for --noreverse
+    "DNS server (--dnsserver <IP>)",  # shortened/descriptive
+    "Enable brute force",  # NEW: when enabled, do not pass automatic -f empty wordlist
+    # "-o <output.xml> (save results in XML)",
     # "Concurrency (-p <n>)",            # COMMENTED OUT: removed from UI options
     # "-h (help)"
 ]
 
+
 class DNSEnumToolProcess(ToolProcessBase):
     param_map = {
-        "Basic run": "",                          # no extra flag; run default
+        "Basic run": "",  # no extra flag; run default
         "Skip PTR (--noreverse)": "--noreverse",
-        "DNS server (--dnsserver <IP>)": "--dnsserver",       # maps UI label to actual flag
-        "Enable brute force": "",                 # recognized but has no direct CLI token here
-        #"-o <output.xml> (save results in XML)": "-o",
+        "DNS server (--dnsserver <IP>)": "--dnsserver",  # maps UI label to actual flag
+        "Enable brute force": "",  # recognized but has no direct CLI token here
+        # "-o <output.xml> (save results in XML)": "-o",
         # "Concurrency (-p <n>)": "-p",            # COMMENTED OUT: keep mapping in source but disabled
         "Verbose output (-v)": "-v",
-        #"-h (help)": "-h"
+        # "-h (help)": "-h"
     }
 
     def __init__(self, target, params):
@@ -61,7 +63,9 @@ class DNSEnumToolProcess(ToolProcessBase):
 
         # Ensure an empty wordlist exists in the project root and only pass it via -f when brute is NOT enabled
         try:
-            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            project_root = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            )
             empty_path = os.path.join(project_root, "emptywordlist.txt")
             if not os.path.exists(empty_path):
                 # create an empty file to disable brute-force wordlist usage

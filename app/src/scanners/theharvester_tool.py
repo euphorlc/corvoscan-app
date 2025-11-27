@@ -23,6 +23,10 @@ standalone_flags = [
     "Exact match only (-x)",
     "DNS resolve (-r, --dns-resolve)",
     "DNS lookup (-n, --dns-lookup)",
+    # Moved from modifiers so these appear under Standalone Flags in the UI:
+    "DNS server (-e, --dns-server)",
+    "Quiet mode (-q, --quiet)",
+    "API scan (-a, --api-scan)",
     # "DNS brute force (-c, --dns-brute)"  # removed / commented out per request
 ]
 
@@ -33,10 +37,10 @@ modifier_flags = [
     # removed: "Use proxies (-p, --proxies)",
     # removed: "Use Shodan (-s, --shodan)",
     # removed: "Virtual host verification (-v, --virtual-host)",
-    "DNS server (-e, --dns-server)",
+    # DNS server moved to standalone_flags
     # removed: "Output filename (-f, --filename)",
     # "Wordlist (-w, --wordlist)"  # removed / commented out per request
-    "Quiet mode (-q, --quiet)",
+    # Quiet mode moved to standalone_flags
 ]
 
 param_map = {
@@ -129,8 +133,20 @@ class TheHarvesterToolProcess(ToolProcessBase):
         super().__init__("theharvester", target, params)
 
     def build_command(self):
+        # Get the absolute path to theHarvester
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(current_dir))
+        theharvester_path = os.path.join(
+            project_root, "tools", "theHarvester", "theHarvester.py"
+        )
+
+        # Use the virtual environment's Python interpreter
+        venv_python = os.path.join(project_root, "venv", "bin", "python")
+        if not os.path.exists(venv_python):
+            venv_python = "python3"  # Fallback to system python
+
         # Ensure -b <source> is placed before -d <domain>
-        cmd = ["theHarvester"]
+        cmd = [venv_python, theharvester_path]
 
         # Look for the source tuple (expected from the UI as a required field)
         source_val = None

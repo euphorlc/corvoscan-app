@@ -39,9 +39,7 @@ class ScanHandler:
                 continue
             self.active_scans[tool_lc] = proc
             # debug: send exact argv to the GUI terminal via the output callback
-            output_callback(
-                tool_lc, f"DEBUG start command: {' '.join(proc.build_command())}\r\n"
-            )
+            output_callback(tool_lc, f"$ {' '.join(proc.build_command())}\r\n")
             proc.start(lambda t, line, tool_lc=tool_lc: output_callback(tool_lc, line))
 
     def stop_tool(self, tool_name):
