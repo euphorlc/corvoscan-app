@@ -82,6 +82,8 @@ echo "[-] Launching $APP_NAME..."
 docker run -it --rm \
     --name "$CONTAINER_NAME" \
     $NET_FLAGS \
+    --cap-add=NET_RAW \
+    --cap-add=NET_ADMIN \
     -e DISPLAY="$DISPLAY_VAR" \
     $X11_MOUNT \
     -v "$OUTPUT_DIR":/home/corvo/app/output \

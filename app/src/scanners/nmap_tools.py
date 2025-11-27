@@ -7,26 +7,23 @@ import os
 value_required = [
     "Timing template (-T0-5)",
     "Custom port range (-p)",
-    "XML Output (-oX)"
+    "XML Output (-oX)",
 ]
 
 # Standalone flags (exact strings must match main.py's tools_data)
 standalone_flags = [
     "Fast scan (-F)",
-    "Service detection (-sV)",       # unified label for service/version detection (-sV)
+    "Service detection (-sV)",  # unified label for service/version detection (-sV)
     "OS detection (-O)",
-    "SYN (Stealth) scan (-sS)",      # single canonical label for -sS
+    "SYN (Stealth) scan (-sS)",  # single canonical label for -sS
     "UDP scan (-sU)",
     "Ping scan (-sn)",
     "Script scan (-sC)",
-    "Traceroute (--traceroute)"
+    "Traceroute (--traceroute)",
 ]
 
 # Modifier flags (exact strings must match main.py's tools_data)
-modifier_flags = [
-    "Timing template (-T0-5)",
-    "Custom port range (-p)"
-]
+modifier_flags = ["Timing template (-T0-5)", "Custom port range (-p)"]
 
 # Basic param_map for building commands (map UI label -> nmap flag)
 param_map = {
@@ -40,13 +37,22 @@ param_map = {
     "Traceroute (--traceroute)": "--traceroute",
     "Timing template (-T0-5)": "-T",
     "Custom port range (-p)": "-p",
-    "XML Output (-oX)": "-oX"
+    "XML Output (-oX)": "-oX",
 }
+
 
 class NmapToolProcess(ToolProcessBase):
 
-# These scan types require root privileges
-    root_required_flags = {"-sS", "-sU", "-O", "-sF", "-sX", "-sN", "--traceroute"}  # -A removed
+    # These scan types require root privileges
+    root_required_flags = {
+        "-sS",
+        "-sU",
+        "-O",
+        "-sF",
+        "-sX",
+        "-sN",
+        "--traceroute",
+    }  # -A removed
 
     def __init__(self, target, params):
         super().__init__("nmap", target, params)
@@ -86,12 +92,7 @@ class NmapToolProcess(ToolProcessBase):
 
         base_command = ["nmap"] + flags + [self.target]
 
-        # Add sudo if root privileges are needed and we're not already root
-        if self.needs_root() and os.geteuid() != 0:
-            # use -S to read password from stdin and -p "" to suppress prompt text
-            return ["sudo", "-S", "-p", ""] + base_command
-        else:
-            return base_command
+        return base_command
 
     def start(self, output_callback, sudo_password=None):
         def run():
@@ -99,35 +100,13 @@ class NmapToolProcess(ToolProcessBase):
                 command = self.build_command()
                 output_callback("nmap", f"Starting command: {' '.join(command)}\n")
 
-                if command and command[0] == "sudo":
-                    output_callback("nmap", "Executing with sudo (password via stdin)...\n")
-                    self.process = subprocess.Popen(
-                        command,
-                        stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        bufsize=1
-                    )
-                    if sudo_password and self.process.stdin:
-                        try:
-                            self.process.stdin.write(sudo_password + "\n")
-                            self.process.stdin.flush()
-                        except Exception:
-                            pass
-                        try:
-                            self.process.stdin.close()
-                        except Exception:
-                            pass
-                else:
-                    output_callback("nmap", "Executing without sudo password...\n")
-                    self.process = subprocess.Popen(
-                        command,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        bufsize=1
-                    )
+                self.process = subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
 
                 # Read output line by line
                 for line in self.process.stdout:
@@ -140,7 +119,9 @@ class NmapToolProcess(ToolProcessBase):
                     if return_code == 1 and "sudo" in str(command):
                         output_callback("nmap", "Error: Sudo authentication failed.\n")
                     else:
-                        output_callback("nmap", f"Command failed with exit code {return_code}\n")
+                        output_callback(
+                            "nmap", f"Command failed with exit code {return_code}\n"
+                        )
 
             except Exception as e:
                 output_callback("nmap", f"Error executing nmap: {str(e)}\n")

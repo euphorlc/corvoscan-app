@@ -61,6 +61,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxi6 \
     libxtst6 \
     libxrandr2 \
+    libcap2-bin \
     # Clean up to keep image smaller
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -74,6 +75,19 @@ RUN git clone https://github.com/urbanadventurer/WhatWeb.git /usr/share/whatweb 
     && bundle install \
     && ln -s /usr/share/whatweb/whatweb /usr/bin/whatweb \
     && chmod +x /usr/share/whatweb/whatweb
+
+# ---------------------------------------------------------------
+# NMAP PERMISSIONS
+# ---------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# FIX: Nmap Permissions (Targeting the REAL binary)
+# -----------------------------------------------------------------------------
+# 1. We look for the real binary path (dereference symlinks/wrappers)
+# 2. We apply capabilities to THAT binary, not the /usr/bin/nmap script
+RUN NMAP_REAL=$(readlink -f /usr/bin/nmap) \
+    && if [ "$NMAP_REAL" = "/usr/bin/nmap" ] && [ -f "/usr/lib/nmap/nmap" ]; then NMAP_REAL="/usr/lib/nmap/nmap"; fi \
+    && echo "Applying capabilities to: $NMAP_REAL" \
+    && setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip "$NMAP_REAL"
 
 # ---------------------------------------------------------------
 # USER CONFIGURATION

@@ -6,12 +6,13 @@ from src.scanners.theharvester_tool import TheHarvesterToolProcess
 from src.scanners.whatweb_tool import WhatWebToolProcess
 from src.scanners.whois_tool import WhoisToolProcess
 
+
 # ensure your ScanHandler keeps active_scans mapping (tool_key -> process instance)
 class ScanHandler:
     def __init__(self):
         self.active_scans = {}
 
-    def start_scan(self, target, tools, parameters, output_callback, sudo_password=None):
+    def start_scan(self, target, tools, parameters, output_callback):
         for tool in tools:
             tool_lc = tool.lower()
             params = parameters.get(tool, []) or parameters.get(tool_lc, [])
@@ -24,7 +25,9 @@ class ScanHandler:
             elif tool_lc == "nmap":
                 proc = NmapToolProcess(target, params)
                 self.active_scans[tool_lc] = proc
-                proc.start(lambda t, line, tool_lc=tool_lc: output_callback(tool_lc, line), sudo_password=sudo_password)
+                proc.start(
+                    lambda t, line, tool_lc=tool_lc: output_callback(tool_lc, line)
+                )
                 continue
             elif tool_lc == "whatweb":
                 proc = WhatWebToolProcess(target, params)
@@ -36,7 +39,9 @@ class ScanHandler:
                 continue
             self.active_scans[tool_lc] = proc
             # debug: send exact argv to the GUI terminal via the output callback
-            output_callback(tool_lc, f"DEBUG start command: {' '.join(proc.build_command())}\r\n")
+            output_callback(
+                tool_lc, f"DEBUG start command: {' '.join(proc.build_command())}\r\n"
+            )
             proc.start(lambda t, line, tool_lc=tool_lc: output_callback(tool_lc, line))
 
     def stop_tool(self, tool_name):

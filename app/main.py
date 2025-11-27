@@ -2296,15 +2296,6 @@ class HelloWindow(QWidget):
 
         # Check if sudo is needed
         # Command preview may not start with "sudo " exactly, so detect presence instead
-        needs_sudo = "sudo" in command_preview
-        sudo_password = None
-        if needs_sudo:
-            sudo_password = get_sudo_password(self)
-            if not sudo_password:
-                self.send_to_terminal(
-                    tool_key, f"Scan cancelled: sudo password not provided.\r\n"
-                )
-                return
 
         # Start scan with the final parameters (includes Wordlist tuple if provided)
         # Clear the parser state for this tool to prevent accumulation from previous scans
@@ -2316,7 +2307,6 @@ class HelloWindow(QWidget):
             [tool_key],
             parameters,
             self.output_callback,
-            sudo_password=sudo_password,
         )
         self.send_to_terminal(
             tool_key,
@@ -2486,17 +2476,6 @@ class HelloWindow(QWidget):
                 show_error_popup(self, msg)
                 return
 
-            # If any preview includes sudo, prompt once
-            needs_sudo = any("sudo" in (p or "").lower() for p in previews.values())
-            sudo_password = None
-            if needs_sudo:
-                sudo_password = get_sudo_password(self)
-                if not sudo_password:
-                    show_error_popup(
-                        self, "Scan All cancelled: sudo password required."
-                    )
-                    return
-
             # Clear parser state for each tool and start them all concurrently
             tool_keys = list(parameters.keys())
             for tk in tool_keys:
@@ -2512,7 +2491,6 @@ class HelloWindow(QWidget):
                 tool_keys,
                 parameters,
                 self.output_callback,
-                sudo_password=sudo_password,
             )
 
             # User feedback per-tab
@@ -4855,16 +4833,6 @@ class HelloWindow(QWidget):
                 pass
         except Exception:
             pass
-
-
-def get_sudo_password(parent=None):
-    password, ok = QInputDialog.getText(
-        parent,
-        "Sudo Required",
-        "Enter your sudo password:",
-        QLineEdit.EchoMode.Password,
-    )
-    return password if ok else None
 
 
 # --- Quick tooltip filter: show tooltip immediately on hover (Enter), hide on Leave.
