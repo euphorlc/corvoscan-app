@@ -1,9 +1,12 @@
-# === Import Python Modules ===
+# --- Imports ---
 import sys
 import os
 import re
 import json
+import time
 from PyQt6.QtCore import pyqtSignal
+from unittest import result
+from PyQt6.QtCore import pyqtSignal, QRegularExpression
 from PyQt6.QtWidgets import (
     QApplication,
     QWidget,
@@ -17,22 +20,22 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QTextEdit,
     QScrollArea,
-    QMessageBox,
+    QPlainTextEdit,
     QFileDialog,
     QInputDialog,
     QComboBox,
     QListView,
     QTabWidget,
+    QRadioButton,
+    QButtonGroup,
 )
 from PyQt6.QtWidgets import QToolTip
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtCore import QUrl
-
 from PyQt6.QtGui import QGuiApplication
 from PyQt6.QtGui import QFont
 from PyQt6.QtCore import Qt, QTimer, QEvent, QObject
-from PyQt6.QtGui import QCursor
-from PyQt6.QtGui import QTextDocument
+from PyQt6.QtGui import QCursor, QTextDocument, QRegularExpressionValidator
 from PyQt6.QtPrintSupport import QPrinter
 
 from src.scan_handler import ScanHandler
@@ -40,6 +43,8 @@ from src.popup_utils import (
     show_error_popup,
     show_confirm_clear,
     show_terminal_clear_choice,
+    show_info_popup,
+    show_critical_popup,
 )
 from src.results_parser import ResultsManager
 from src.parsers.nmap_parser import NmapResultsParser
@@ -68,6 +73,25 @@ from src.scanners import (
     nslookup_tool,
     dnsenum_tool,
 )
+
+
+# add import for styling helpers/constants
+from src.ui_styles import (
+    rounded_frame,
+    create_division_title,
+    limit_combo_popup,
+    DEFAULT_BTN_STYLE,
+    ACTIVE_BTN_STYLE,
+    TOOLTIP_APP_STYLE,
+    PARAMETER_SCROLL_STYLE,
+    RESULTS_SCROLLBAR_STYLE,
+    RESULTS_CSS,
+    SCAN_START_STYLE,
+    SCAN_STOP_STYLE,
+    SCAN_SELECTED_START_STYLE,
+    SCAN_SELECTED_STOP_STYLE,
+)
+
 
 ANSI_RESET = "\x1b[0m"
 
@@ -135,6 +159,46 @@ def limit_combo_popup(combo: QComboBox, max_items: int = 10):
         pass
 
 
+# Small helper widget: a horizontal group of radio buttons that provides
+# currentText()/setCurrentText() (QComboBox-like API) so existing save/restore
+# code works without further changes.
+class RadioChoiceWidget(QWidget):
+    def __init__(self, choices, default=None, parent=None):
+        super().__init__(parent)
+        # use an internal horizontal layout for buttons
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        self._buttons = []
+        self._group = QButtonGroup(self)
+        for i, choice in enumerate(list(choices)):
+            rb = QRadioButton(str(choice))
+            layout.addWidget(rb)
+            self._group.addButton(rb, i)
+            self._buttons.append(rb)
+        # select default if provided, otherwise first
+        if default is not None:
+            self.setCurrentText(default)
+        elif self._buttons:
+            self._buttons[0].setChecked(True)
+
+    def currentText(self):
+        btn = self._group.checkedButton()
+        return btn.text() if btn else ""
+
+    def setCurrentText(self, text):
+        if text is None:
+            return
+        txt = str(text).lower()
+        for rb in self._buttons:
+            try:
+                if rb.text().lower() == txt:
+                    rb.setChecked(True)
+                    return
+            except Exception:
+                pass
+
+
 # --- CollapsibleCategory: Tool Category Widget ---
 
 
@@ -149,9 +213,22 @@ class CollapsibleCategory(QWidget):
         self.main_layout.setSpacing(0)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.header = QPushButton(title)
+        # show a collapse/expand symbol so users know this is a dropdown
+        # use a simple unicode triangle: right-pointing when closed, down-pointing when open
+        self._raw_title = title
+        self.header = QPushButton(f"› {title}")
         # Disable any tooltip on the header so div1 never shows hover popups
         self.header.setToolTip("")
+        # Ensure the category header button won't be clipped horizontally
+        # by allowing it to expand horizontally and enforcing a modest
+        # minimum height so the label is always fully visible.
+        try:
+            self.header.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            )
+            self.header.setMinimumHeight(40)
+        except Exception:
+            pass
         try:
             self.header.setAttribute(Qt.WidgetAttribute.WA_HasToolTip, False)
         except Exception:
@@ -198,34 +275,8 @@ class CollapsibleCategory(QWidget):
         content_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         self.tool_buttons = []
-        self.default_style = """
-            QPushButton {
-                background: #e0e0e0;
-                color: #222;
-                border-radius: 8px;
-                padding: 4px 16px;
-                font-size: 16px;
-                border: none;
-                min-width: 80px;
-            }
-            QPushButton:hover {
-                background: #cccccc;
-            }
-        """
-        self.active_style = """
-            QPushButton {
-                background: #a3d8f4;
-                color: #222;
-                border-radius: 8px;
-                padding: 4px 16px;
-                font-size: 16px;
-                border: none;
-                min-width: 80px;
-            }
-            QPushButton:hover {
-                background: #90caf9;
-            }
-        """
+        self.default_style = DEFAULT_BTN_STYLE
+        self.active_style = ACTIVE_BTN_STYLE
 
         for tool_name in tools:
             row = QHBoxLayout()
@@ -291,9 +342,18 @@ class CollapsibleCategory(QWidget):
         )  # adjust this value if you want a different visible height
         self.scroll_area.setVisible(False)
         self.main_layout.addWidget(self.scroll_area)
-        self.header.toggled.connect(
-            lambda checked: self.scroll_area.setVisible(checked)
-        )
+
+        # update the arrow and visibility when toggled
+        def _on_header_toggled(checked: bool):
+            try:
+                self.scroll_area.setVisible(checked)
+                # update symbol: down when open, right when closed
+                sym = "⌄" if checked else "›"
+                self.header.setText(f"{sym} {self._raw_title}")
+            except Exception:
+                pass
+
+        self.header.toggled.connect(_on_header_toggled)
 
     # ... Handles tool button click ...
     def on_button_clicked(self, tool_name):
@@ -434,37 +494,8 @@ class ToolNameBox(QFrame):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self.params_widget)
-        # Parameter scroll area remains borderless; keep scrollbars styled as before
-        scroll.setStyleSheet(
-            """
-            QScrollArea {
-                border: none;
-                background: transparent;
-            }
-            QScrollBar:vertical {
-                background: #f0f0f0;
-                width: 8px;
-                margin: 2px 0 2px 0;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical {
-                background: #bdbdbd;
-                min-height: 24px;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #90caf9;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-                background: none;
-                border: none;
-            }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                background: none;
-            }
-        """
-        )
+        # use centralized parameter scroll style
+        scroll.setStyleSheet(PARAMETER_SCROLL_STYLE)
         scroll.setMinimumHeight(200)
 
         self.params_widget.setStyleSheet("background: #f5f5f5;")
@@ -555,13 +586,33 @@ class ToolNameBox(QFrame):
 
         # If this tool is FFUF, add the static textbox at the top of the parameters section
         if tool_name.upper() == "FFUF":
+            # Add Protocol radio control (required, no checkbox / no big "[REQUIRED]" label)
+            # Make font-size match checkbox labels (16px) so it visually aligns with other parameter controls.
+            self.protocol_label = QLabel("Protocol:")
+            self.protocol_label.setStyleSheet(
+                "font-size:16px; color: #444; margin-top:6px;"
+            )
+            self.protocol_widget = RadioChoiceWidget(["https", "http"], default="https")
+            self.protocol_widget.setMinimumWidth(140)
+            # Increase radio text size to match checkboxes
+            self.protocol_widget.setStyleSheet("QRadioButton { font-size:16px; }")
+            self.params_layout.addWidget(
+                self.protocol_label, alignment=Qt.AlignmentFlag.AlignLeft
+            )
+            self.params_layout.addWidget(
+                self.protocol_widget, alignment=Qt.AlignmentFlag.AlignLeft
+            )
+
             self.ffuf_static_label = QLabel("FFUF wordlist:")
+            # Make wordlist label/input visually consistent with checkboxes (slightly larger font)
             self.ffuf_static_label.setStyleSheet(
-                "font-size: 14px; color: #444; margin-top:8px;"
+                "font-size:16px; color: #444; margin-top:8px;"
             )
             self.ffuf_top_input = QLineEdit()
             self.ffuf_top_input.setPlaceholderText("Select wordlist file path")
             self.ffuf_top_input.setMaximumHeight(30)
+            # Larger input font for readability
+            self.ffuf_top_input.setStyleSheet("font-size:16px; padding:6px;")
             self.params_layout.addWidget(
                 self.ffuf_static_label, alignment=Qt.AlignmentFlag.AlignLeft
             )
@@ -571,6 +622,8 @@ class ToolNameBox(QFrame):
 
             select_btn = QPushButton("Select...")
             select_btn.setMaximumWidth(140)
+            # Make Select button font similar to other buttons/controls
+            select_btn.setStyleSheet("font-size:16px; padding:6px 12px;")
 
             # open file dialog and set selected path into the textbox
             def _choose_wordlist():
@@ -638,6 +691,9 @@ class ToolNameBox(QFrame):
         inserted_standalone_section = False
         inserted_modifier_section = False
         for param in ordered_params:
+            # For FFUF, Protocol is rendered above as a radio widget — skip creating a checkbox/required label for it.
+            if tool_key == "ffuf" and param == "Protocol (http/https)":
+                continue
             # Required-style parameters (theHarvester uses "[REQUIRED]" marker)
             is_required_field = "[REQUIRED]" in param
             orig_index = find_orig_index(param)
@@ -722,6 +778,18 @@ class ToolNameBox(QFrame):
                     self.params_layout.addWidget(combo)
                     cb.value_input = combo
                     continue
+                # REPLACE: Protocol (was a QComboBox here) -> RadioChoiceWidget
+                if param == "Protocol (http/https)":
+                    # In the rare fallback path where protocol radio gets created here, ensure consistent styling.
+                    radio = RadioChoiceWidget(["https", "http"], default="https")
+                    radio.setToolTip(
+                        "Choose protocol to use when constructing the target URL for ffuf (https default)."
+                    )
+                    radio.setMinimumWidth(140)
+                    radio.setStyleSheet("QRadioButton { font-size:16px; }")
+                    self.params_layout.addWidget(radio)
+                    cb.value_input = radio
+                    continue
                 if param in current_value_required:
                     # For theHarvester source selection show a combobox limited to ~7 visible items
                     if param == "[REQUIRED] Source (-b, --source)":
@@ -729,48 +797,48 @@ class ToolNameBox(QFrame):
                         # Common sources — add or adjust as desired
                         sources = [
                             "baidu",
-                            "bevigil",
+                            # "bevigil",
                             "bing",
                             "bingapi",
                             "brave",
-                            "bufferoverun",
-                            "builtwith",
-                            "censys",
+                            # "bufferoverun",
+                            # "builtwith",
+                            # "censys",
                             "certspotter",
-                            "criminalip",
+                            # "criminalip",
                             "crtsh",
-                            "dehashed",
-                            "dnsdumpster",
+                            # "dehashed",
+                            # "dnsdumpster",
                             "duckduckgo",
-                            "fullhunt",
-                            "github-code",
+                            # "fullhunt",
+                            # "github-code",
                             "hackertarget",
-                            "haveibeenpwned",
-                            "hunter",
-                            "hunterhow",
-                            "intelx",
-                            "leaklookup",
-                            "netlas",
-                            "onyphe",
+                            # "haveibeenpwned",
+                            # "hunter",
+                            # "hunterhow",
+                            # "intelx",
+                            # "leaklookup",
+                            # "netlas",
+                            # "onyphe",
                             "otx",
-                            "pentesttools",
-                            "projectdiscovery",
+                            # "pentesttools",
+                            # "projectdiscovery",
                             "rapiddns",
-                            "rocketreach",
-                            "securityscorecard",
-                            "securityTrails",
-                            "shodan",
+                            # "rocketreach",
+                            # "securityscorecard",
+                            # "securityTrails",
+                            # "shodan",
                             "sitedossier",
-                            "subdomaincenter",
-                            "subdomainfinderc99",
-                            "threatminer",
-                            "tomba",
+                            #  "subdomaincenter",
+                            #  "subdomainfinderc99",
+                            #  "threatminer",
+                            #  "tomba",
                             "urlscan",
-                            "venacus",
-                            "virustotal",
-                            "whoisxml",
+                            #  "venacus",
+                            #  "virustotal",
+                            # "whoisxml",
                             "yahoo",
-                            "zoomeye",
+                            # "zoomeye",
                         ]
                         # Insert explicit blank first option (WHOIS-style) and do NOT allow typing
                         combo.insertItem(0, "")
@@ -965,7 +1033,7 @@ class ToolNameBox(QFrame):
                         "whois.norid.no",
                         "whois.nic.es",
                     ]
-                    # Provide only real servers; do not insert an explicit empty choice
+                    # Present only the real servers (no blank first choice)
                     combo.addItems([s for s in whois_servers if s and s.strip()])
                     combo.setMaxVisibleItems(10)
                     combo.setEditable(False)
@@ -996,108 +1064,197 @@ class ToolNameBox(QFrame):
                     limit_combo_popup(combo, 10)
                     self.params_layout.addWidget(combo)
                     cb.value_input = combo
+                # NEW: Protocol should be radio buttons (not a textbox) — but we created a dedicated widget above;
+                # ensure any accidental matches are ignored here.
+                elif param == "Protocol (http/https)":
+                    # already created at top of FFUF params; attach no checkbox widget here
+                    cb.value_input = None
+                    # continue so we don't add another input widget
+                    continue
                 else:
                     le = QLineEdit()
                     # Preserve helpful placeholders/tooltips from previous logic
                     if "Timing template" in param:
                         le.setPlaceholderText("0-5 (e.g., 4 for aggressive)")
-                        # le.setToolTip("Timing templates:\nT0=Paranoid (very slow)\nT1=Sneaky (slow)\nT2=Polite (slow)\nT3=Normal (default)\nT4=Aggressive (fast, recommended)\nT5=Insane (very fast)")
+                        #   le.setToolTip("Timing templates:\nT0=Paranoid (very slow)\nT1=Sneaky (slow)\nT2=Polite (slow)\nT3=Normal (default)\nT4=Aggressive (fast, recommended)\nT5=Insane (very fast)")
+                        try:
+                            rx = QRegularExpression(r"^[0-9]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif "Custom port range" in param:
                         le.setPlaceholderText("e.g., 80,443 or 1-1000")
-                        # le.setToolTip("Specify ports: single (80), multiple (80,443,8080), or range (1-1000)")
+                        #   le.setToolTip("Specify ports: single (80), multiple (80,443,8080), or range (1-1000)")
+                        try:
+                            rx = QRegularExpression(r"^[0-9,-]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif param == "Host Timeout":
                         le.setPlaceholderText("e.g., 30s, 2m, 1h")
-                        # le.setToolTip("Timeout for each host: seconds (30s), minutes (2m), hours (1h)")
+                        #   le.setToolTip("Timeout for each host: seconds (30s), minutes (2m), hours (1h)")
+                        try:
+                            rx = QRegularExpression(r"^[0-9smh]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif "XML Output" in param:
                         le.setPlaceholderText("filename.xml")
-                    # le.setToolTip("Output file name for XML results")
+                    #    le.setToolTip("Output file name for XML results")
                     elif param == "WHOIS server (-h)":
                         le.setPlaceholderText(
                             "whois.verisign-grs.com (leave blank for auto-detect)"
                         )
-                        # le.setToolTip("Custom whois server hostname. Leave blank to automatically detect the appropriate server.")
+                    #    le.setToolTip("Custom whois server hostname. Leave blank to automatically detect the appropriate server.")
                     elif param == "Port (-p)":
                         le.setPlaceholderText("43 (leave blank for default)")
-                    # le.setToolTip("Whois server port number. Leave blank to use default port 43.")
+                        #   le.setToolTip("Whois server port number. Leave blank to use default port 43.")
+                        try:
+                            rx = QRegularExpression(r"^[0-9.,-]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif param == "Inverse attribute search (-i ATTR)":
                         le.setPlaceholderText("e.g., email or nic-hdl")
-                    # le.setToolTip("Inverse attribute to search for (attribute name or value). Example: 'email' or 'nic-hdl'.")
+                    #    le.setToolTip("Inverse attribute to search for (attribute name or value). Example: 'email' or 'nic-hdl'.")
                     elif param == "Object type (-T TYPE)":
                         le.setPlaceholderText("e.g., domain, person, role")
-                    # le.setToolTip("Restrict query to a specific object type (domain, person, role, etc.).")
+                    #   le.setToolTip("Restrict query to a specific object type (domain, person, role, etc.).")
                     # DNSEnum-specific placeholders/tooltips
                     elif param == "DNS server (--dnsserver <IP>)":
                         le.setPlaceholderText("e.g., 8.8.8.8")
-                        # le.setToolTip("IP address of the DNS server to query (IPv4 or IPv6).")
+                        #   le.setToolTip("IP address of the DNS server to query (IPv4 or IPv6).")
+                        try:
+                            rx = QRegularExpression(r"^[0-9.]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif param == "Concurrency (-p <n>)":
                         le.setPlaceholderText("e.g., 10")
-                    # le.setToolTip("Limit number of concurrent DNS queries (integer).")
+                        #   le.setToolTip("Limit number of concurrent DNS queries (integer).")
+                        try:
+                            rx = QRegularExpression(r"^[0-9]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     # Harvester-specific placeholders/tooltips
                     elif param == "Limit (-l, --limit)":
                         le.setPlaceholderText("e.g., 100")
-                    # le.setToolTip("Maximum number of results to return from the selected source (integer).")
+                        #   le.setToolTip("Maximum number of results to return from the selected source (integer).")
+                        try:
+                            rx = QRegularExpression(r"^[0-9]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif param == "Start result (-S, --start)":
                         le.setPlaceholderText("e.g., 0")
-                    # le.setToolTip("Result offset (zero-based) to start returning results from.")
+                        #   le.setToolTip("Result offset (zero-based) to start returning results from.")
+                        try:
+                            rx = QRegularExpression(r"^[0-9-]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif param == "DNS server (-e, --dns-server)":
                         le.setPlaceholderText("e.g., 8.8.8.8")
-                    # le.setToolTip("DNS server IP address to use for DNS queries (optional).")
+                        #   le.setToolTip("DNS server IP address to use for DNS queries (optional).")
+                        try:
+                            rx = QRegularExpression(r"^[0-9.]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     # WhatWeb-specific placeholders/tooltips (match whatweb_tool.py labels)
                     elif param == "User-Agent (--user-agent)":
                         le.setPlaceholderText("Custom User-Agent string")
-                    # le.setToolTip("Set the User-Agent header for requests (helps evade basic blocks).")
+                    #    le.setToolTip("Set the User-Agent header for requests (helps evade basic blocks).")
                     elif param == "Follow redirects (--follow-redirect)":
                         le.setPlaceholderText("always | same-origin | never")
-                    # le.setToolTip("Follows redirects — may increase number of requests.")
+                    #    le.setToolTip("Follows redirects — may increase number of requests.")
                     elif param == "Max redirects (--max-redirects)":
                         le.setPlaceholderText("e.g., 5")
-                    #  le.setToolTip("Maximum number of redirects to follow when following redirects.")
+                        #    le.setToolTip("Maximum number of redirects to follow when following redirects.")
+                        try:
+                            rx = QRegularExpression(r"^[0-9]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif param == "Wait (--wait)":
                         le.setPlaceholderText("0.5 (seconds) — conservative default")
-                    #  le.setToolTip("Delay between requests in seconds. Larger waits reduce detection risk.")
+                        #    le.setToolTip("Delay between requests in seconds. Larger waits reduce detection risk.")
+                        try:
+                            rx = QRegularExpression(r"^[0-9.]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif param == "Max threads (--max-threads)":
                         le.setPlaceholderText("4 (recommended conservative default)")
-                    # le.setToolTip("Max concurrent threads. Higher values are faster but increase chance of detection.")
+                        # le.setToolTip("Max concurrent threads. Higher values are faster but increase chance of detection.")
+                        try:
+                            rx = QRegularExpression(r"^[0-9]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif param == "Aggressiveness (1-4)":
                         le.setPlaceholderText("1-4 (1=passive, 4=aggressive)")
-                    # le.setToolTip("Aggression level: 1=passive, 2=polite, 3=normal, 4=aggressive")
+                        le.setToolTip(
+                            "Aggression level: 1=passive, 2=polite, 3=normal, 4=aggressive"
+                        )
                     elif param == "Custom matcher":
                         le.setPlaceholderText("e.g., status:403")
-                    #  le.setToolTip("Custom matching rules for responses")
+                        #    le.setToolTip("Custom matching rules for responses")
+                        try:
+                            rx = QRegularExpression(r"^[0-9,]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif param == "Size filter":
                         le.setPlaceholderText("e.g., 100,200-400")
-                    # le.setToolTip("Filter by response size")
+                        #  le.setToolTip("Filter by response size")
+                        try:
+                            rx = QRegularExpression(r"^[0-9,-]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif param == "Time filter":
                         le.setPlaceholderText("e.g., 1s, 2m")
-                    #  le.setToolTip("Filter by response time")
-                    elif param == "Regex filter":
-                        le.setPlaceholderText("e.g., ^Admin|^Login")
-                    # le.setToolTip("Regular expression to match against response")
-                    elif param == "Filter code":
-                        le.setPlaceholderText("e.g., 403,404")
-                    # le.setToolTip("Comma-separated HTTP response codes to filter (e.g., 403,404). Responses matching these codes will be filtered.")
-                    elif param == "Header fuzz":
-                        le.setPlaceholderText("e.g., X-Forwarded-For: 127.0.0.1")
-                    # le.setToolTip("HTTP header(s) to send/fuzz. Use 'Header: Value' syntax.")
-                    elif param == "POST fuzz":
-                        le.setPlaceholderText("e.g., username=admin&password=")
-                    # le.setToolTip("Data to send in POST requests")
-                    elif param == "GET fuzz":
-                        le.setPlaceholderText("e.g., ?id=1")
-                    # le.setToolTip("Query parameters to append to URLs")
+                        # le.setToolTip("Filter by response time")
+                        try:
+                            rx = QRegularExpression(r"^[0-9smh]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     # FFUF-specific placeholders/tooltips (new additions)
                     elif param == "Status codes":
                         le.setPlaceholderText("e.g., 200,301,302")
-                    #  le.setToolTip("Comma-separated HTTP status codes to match (e.g., 200,301).")
+                        # le.setToolTip("Comma-separated HTTP status codes to match (e.g., 200,301).")
+                        try:
+                            rx = QRegularExpression(r"^[0-9,]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif param == "Extension fuzz":
                         le.setPlaceholderText("e.g., .php,.html or php,html")
-                    #  le.setToolTip("Comma-separated file extensions to try (e.g., .php,.html).")
+                        # le.setToolTip("Comma-separated file extensions to try (e.g., .php,.html).")
+                        try:
+                            rx = QRegularExpression(r"^[.a-zA-Z]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif param == "Depth limit":
                         le.setPlaceholderText("e.g., 3")
-                    #  le.setToolTip("Maximum recursion depth for fuzzing (integer).")
+                        # le.setToolTip("Maximum recursion depth for fuzzing (integer).")
+                        try:
+                            rx = QRegularExpression(r"^[0-9]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     elif param == "Rate limit":
                         le.setPlaceholderText("e.g., 100")
-                    # le.setToolTip("Limit request rate (requests per second or as supported by ffuf).")
+                        # le.setToolTip("Limit request rate (requests per second or as supported by ffuf).")
+                        try:
+                            rx = QRegularExpression(r"^[0-9]*$")
+                            le.setValidator(QRegularExpressionValidator(rx))
+                        except Exception:
+                            pass
                     else:
                         le.setPlaceholderText("Enter value")
                     self.params_layout.addWidget(le)
@@ -1128,42 +1285,17 @@ class HelloWindow(QWidget):
         self._tooltip_filter = QuickTooltipFilter(self)
         screen = QGuiApplication.primaryScreen()
         rect = screen.availableGeometry()
-        self.resize(int(rect.width() * 0.9), int(rect.height() * 0.9))
+        # Use a slightly larger default window size so the left category
+        # panel and other UI columns are more likely to be fully visible
+        # on startup (95% of available screen instead of 90%).
+        self.resize(int(rect.width() * 0.95), int(rect.height() * 0.95))
         # Modern tooltip styling (dark, rounded, padded)
         try:
             QToolTip.setFont(QFont("Segoe UI", 10))
             app = QApplication.instance()
             if app:
-                app.setStyleSheet(
-                    """
-                    /* Tooltip styling (slightly dark so text is readable) */
-                    QToolTip {
-                        background-color: #2b2b2b;
-                        color: #ffffff;
-                        border: 1px solid #444;
-                        padding: 8px;
-                        border-radius: 8px;
-                    }
-
-                    /* Ensure combobox popup (the dropdown list) has a dark background and readable text */
-                    QComboBox QAbstractItemView {
-                        background-color: #2b2b2b;
-                        color: #f5f5f5;
-                        selection-background-color: #1976d2;
-                        selection-color: #ffffff;
-                        outline: 0;
-                    }
-                    QComboBox QAbstractItemView::item:hover {
-                        background-color: #155fa0;
-                        color: #ffffff;
-                    }
-
-                    /* Make the combobox text itself readable */
-                    QComboBox {
-                        color: #222222;
-                    }
-                    """
-                )
+                # apply centralized app tooltip / combobox stylesheet
+                app.setStyleSheet(TOOLTIP_APP_STYLE)
         except Exception:
             pass
 
@@ -1242,21 +1374,21 @@ class HelloWindow(QWidget):
             "WhatWeb": {
                 "description": "WhatWeb: Fingerprint web technologies.",
                 "parameters": [
-                    # Standalone / immediate flags (short labels)
                     "Default scan",
                     "Verbose (-v)",
-                    # Modifiers / value-taking flags (must match whatweb_tool.py keys)
                     "Follow redirects (--follow-redirect)",
                     "Max redirects (--max-redirects)",
                     "User-Agent (--user-agent)",
                     "Header (--header)",
                     "Wait (--wait)",
                     "Max threads (--max-threads)",
+                    # removed "User-Agent (--user-agent)" and "Header (--header)"
                 ],
             },
             "FFUF": {
                 "description": "FFUF: Directory and file fuzzing.",
                 "parameters": [
+                    "Protocol (http/https)",  # moved before Default scan and marked required (hidden checkbox + radio)
                     "Default scan",
                     "Recursion",
                     "Status codes",
@@ -1264,13 +1396,9 @@ class HelloWindow(QWidget):
                     "Extension fuzz",
                     "Depth limit",
                     "Rate limit",
-                    "Header fuzz",
-                    "Regex filter",
-                    "Size filter",
                     "Time filter",
                     "Follow redirects",
                     "Ignore SSL",
-                    "Custom matcher",
                 ],
             },
         }
@@ -1358,13 +1486,27 @@ class HelloWindow(QWidget):
         categories_scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
+
         categories_scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
-        categories_scroll.setMinimumHeight(200)
+        # Allow the categories area to shrink more gracefully when window height
+        # is reduced to avoid clipping left-panel content on small windows.
+        # Keeping a modest minimum ensures it's still usable on very small screens.
+        categories_scroll.setMinimumHeight(120)
         div1_layout.addWidget(categories_scroll)
         div1.setLayout(div1_layout)
-        div1.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        # Let the left panel expand/contract vertically with the main window
+        # so its contents won't be clipped when the window is resized.
+        # Ensure the left panel holds a minimum width so category labels
+        # and buttons are not truncated when the main window is made narrow.
+        try:
+            # Increase left panel minimum width so category labels/buttons
+            # are visible on typical window sizes without requiring fullscreen.
+            div1.setMinimumWidth(360)
+        except Exception:
+            pass
+        div1.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         top_layout.addWidget(div1, stretch=2)
         div2 = rounded_frame()
         div2_layout = QVBoxLayout()
@@ -1377,40 +1519,30 @@ class HelloWindow(QWidget):
         div2_layout.addWidget(self.tool_name_box)
         button_row = QHBoxLayout()
         button_row.addStretch()
-        self.start_button = QPushButton("Start")
-        self.stop_button = QPushButton("Stop")
-        self.start_button.setFixedSize(160, 56)
-        self.stop_button.setFixedSize(160, 56)
-        self.start_button.setStyleSheet(
-            """
-            QPushButton {
-                font-size: 22px;
-                border-radius: 14px;
-                background: #4caf50;
-                color: white;
-                font-weight: bold;
-            }
-            QPushButton:pressed {
-                background: #388e3c;
-            }
-            """
-        )
-        self.stop_button.setStyleSheet(
-            """
-            QPushButton {
-                font-size: 22px;
-                border-radius: 14px;
-                background: #f44336;
-                color: white;
-                font-weight: bold;
-            }
-            QPushButton:pressed {
-                background: #b71c1c;
-            }
-            """
-        )
-        button_row.addWidget(self.start_button)
-        button_row.addWidget(self.stop_button)
+        # styles used for Start / Stop states
+        self._scan_start_style = SCAN_START_STYLE
+        self._scan_stop_style = SCAN_STOP_STYLE
+
+        # Scan Selected styles — slightly smaller font so text fits comfortably
+        self._scan_selected_start_style = SCAN_SELECTED_START_STYLE
+        self._scan_selected_stop_style = SCAN_SELECTED_STOP_STYLE
+
+        # single toggle button
+        self.scan_button = QPushButton("Start Tool")
+        self.scan_button.setFixedSize(160, 56)
+        self.scan_button.setStyleSheet(self._scan_start_style)
+        # on click, decide start or stop based on running state
+        self.scan_button.clicked.connect(self.handle_scan_toggle)
+
+        button_row.addWidget(self.scan_button)
+        # place unified Scan Selected to the right of the Start/Stop button using slightly smaller-font styles
+        self.scan_selected_btn = QPushButton("Start Selected")
+        self.scan_selected_btn.setFixedSize(160, 56)
+        self.scan_selected_btn.setStyleSheet(self._scan_selected_start_style)
+        self.scan_selected_btn.clicked.connect(self.handle_scan_selected_toggle)
+        # small spacer between buttons
+        button_row.addSpacing(8)
+        button_row.addWidget(self.scan_selected_btn)
         div2_layout.addSpacing(6)
         div2_layout.addLayout(button_row)
         div2.setLayout(div2_layout)
@@ -1500,51 +1632,20 @@ class HelloWindow(QWidget):
         self._parse_failure_timers = {}
         # track last progress length per tool so we can overwrite progress line cleanly
         self._last_progress_len = {}
+        # track scan start times (tool_key -> epoch seconds)
+        self._scan_start_times = {}
+        # track whether we've already emitted a scan-complete terminal message per tool
+        self._scan_complete_sent = set()
+        # track which tools are currently running (lowercase keys)
+        self._scan_running_tools = set()
+
         clear_terminal_button = QPushButton("Clear")
         clear_terminal_button.setStyleSheet(
             "font-size: 16px; border-radius: 8px; background: #757575; color: white; font-weight: bold; padding: 8px 24px;"
         )
         # Place "Scan All" on the same row as "Clear", with Scan All on the left and Clear on the right.
         terminal_btn_row = QHBoxLayout()
-        scan_all_btn = QPushButton("Scan Selected")
-        scan_all_btn.setStyleSheet(
-            """
-            QPushButton {
-                font-size: 16px;
-                border-radius: 8px;
-                background: #4caf50;   /* green */
-                color: white;
-                font-weight: bold;
-                padding: 8px 24px;
-            }
-            QPushButton:pressed {
-                background: #388e3c;
-            }
-        """
-        )
-        terminal_btn_row.addWidget(scan_all_btn, alignment=Qt.AlignmentFlag.AlignLeft)
-
-        # New: Stop Selected button placed to the right of "Scan Selected"
-        stop_selected_btn = QPushButton("Stop Selected")
-        stop_selected_btn.setStyleSheet(
-            """
-            QPushButton {
-                font-size: 16px;
-                border-radius: 8px;
-                background: #f44336;
-                color: white;
-                font-weight: bold;
-                padding: 8px 20px;
-            }
-            QPushButton:pressed {
-                background: #b71c1c;
-            }
-        """
-        )
-        terminal_btn_row.addWidget(
-            stop_selected_btn, alignment=Qt.AlignmentFlag.AlignLeft
-        )
-
+        # terminal row: only keep Clear / layout controls here (Scan Selected moved to middle controls)
         terminal_btn_row.addStretch()
         terminal_btn_row.addWidget(
             clear_terminal_button, alignment=Qt.AlignmentFlag.AlignRight
@@ -1573,10 +1674,9 @@ class HelloWindow(QWidget):
                 pass
 
         clear_terminal_button.clicked.connect(clear_xterm)
-        scan_all_btn.clicked.connect(self.handle_scan_all)
 
-        # connect new stop selected button
-        stop_selected_btn.clicked.connect(self.handle_stop_selected)
+        # connect the unified scan-selected toggle
+        self.scan_selected_btn.clicked.connect(self.handle_scan_selected_toggle)
 
         # (removed duplicate connections above to avoid invoking handlers twice)
         div3.setLayout(div3_layout)
@@ -1598,38 +1698,9 @@ class HelloWindow(QWidget):
         self.results_textbox.setReadOnly(True)
         self.results_textbox.setPlaceholderText("Results will appear here.")
         # Match the parameters scrollbar styling: light track, narrow width, rounded thumb and hover color
-        self.results_textbox.setStyleSheet(
-            """
-            QTextEdit {
-                background: #fff;
-                color: #222;
-                border-radius: 8px;
-            }
-            /* vertical scrollbar styling to match parameters/results pane */
-            QTextEdit QScrollBar:vertical {
-                background: #f0f0f0;
-                width: 8px;
-                margin: 2px 0 2px 0;
-                border-radius: 4px;
-            }
-            QTextEdit QScrollBar::handle:vertical {
-                background: #bdbdbd;
-                min-height: 24px;
-                border-radius: 4px;
-            }
-            QTextEdit QScrollBar::handle:vertical:hover {
-                background: #90caf9;
-            }
-            QTextEdit QScrollBar::add-line:vertical, QTextEdit QScrollBar::sub-line:vertical {
-                height: 0px;
-                background: none;
-                border: none;
-            }
-            QTextEdit QScrollBar::add-page:vertical, QTextEdit QScrollBar::sub-page:vertical {
-                background: none;
-            }
-        """
-        )
+        # replace inline CSS with centralized constant
+        self.results_textbox.setStyleSheet(RESULTS_SCROLLBAR_STYLE)
+
         # Keep results visually constrained to the widget width, avoid horizontal scrollbar,
         # and prevent table cells from wrapping (truncate with ellipsis instead of wrapping or expanding).
         try:
@@ -1642,17 +1713,10 @@ class HelloWindow(QWidget):
             # Provide a document-level stylesheet so generated HTML tables/cells won't wrap.
             # This makes table cells use nowrap + overflow:hidden + text-overflow:ellipsis
             # so long cells are truncated rather than wrapping or forcing horizontal scroll.
-            results_css = """
-                table { table-layout: fixed; width: 100%; border-collapse: collapse; }
-                th, td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-                /* keep other block content normal-wrapping */
-                div, p, span { white-space: normal; }
-                pre { white-space: pre-wrap; word-wrap: break-word; }
-            """
+            results_css = RESULTS_CSS
             try:
                 self.results_textbox.document().setDefaultStyleSheet(results_css)
             except Exception:
-                # if document stylesheet isn't supported on a platform, ignore silently
                 pass
 
             # Ensure the QTextDocument text width matches the visible viewport so HTML tables expand to full width.
@@ -1709,38 +1773,8 @@ class HelloWindow(QWidget):
         self.diagnostics_textbox = QTextEdit()
         self.diagnostics_textbox.setReadOnly(True)
         self.diagnostics_textbox.setPlaceholderText("Diagnostics will appear here.")
-        # Apply same scrollbar styling as parameters/results for consistent appearance
-        self.diagnostics_textbox.setStyleSheet(
-            """
-            QTextEdit {
-                background: #fff;
-                color: #222;
-                border-radius: 8px;
-            }
-            QTextEdit QScrollBar:vertical {
-                background: #f0f0f0;
-                width: 8px;
-                margin: 2px 0 2px 0;
-                border-radius: 4px;
-            }
-            QTextEdit QScrollBar::handle:vertical {
-                background: #bdbdbd;
-                min-height: 24px;
-                border-radius: 4px;
-            }
-            QTextEdit QScrollBar::handle:vertical:hover {
-                background: #90caf9;
-            }
-            QTextEdit QScrollBar::add-line:vertical, QTextEdit QScrollBar::sub-line:vertical {
-                height: 0px;
-                background: none;
-                border: none;
-            }
-            QTextEdit QScrollBar::add-page:vertical, QTextEdit QScrollBar::sub-page:vertical {
-                background: none;
-            }
-        """
-        )
+        # diagnostics styling: reuse results scroll CSS
+        self.diagnostics_textbox.setStyleSheet(RESULTS_SCROLLBAR_STYLE)
         diagnostics_layout.addWidget(self.diagnostics_textbox, stretch=1)
         diag_export_row = QHBoxLayout()
         diag_export_row.addStretch()
@@ -1763,6 +1797,16 @@ class HelloWindow(QWidget):
         bottom_layout.addWidget(diagnostics, stretch=1)
         main_layout.addLayout(bottom_layout, stretch=1)
         self.setLayout(main_layout)
+        # Prevent the window from being made narrower than a width that
+        # would clip the left category panel or its buttons. This ensures
+        # the category bar is fully visible at startup and during resize.
+        try:
+            # Choose a conservative minimum width that fits the three
+            # columns (left categories, middle parameters, right terminal/results).
+            self.setMinimumWidth(1200)
+        except Exception:
+            pass
+
         self.scan_handler = ScanHandler()
 
         # Initialize results management system
@@ -1776,11 +1820,11 @@ class HelloWindow(QWidget):
         self.results_manager.register_parser("ffuf", FFUFParser())
 
         # Connect buttons
-        self.start_button.clicked.connect(self.handle_start_scan)
-        self.stop_button.clicked.connect(self.handle_stop_scan)
+        # scan_button is already connected above; keep other button connections unchanged
         self.export_button.clicked.connect(self.handle_export_results)
         self.clear_results_button.clicked.connect(self.handle_clear_results)
         self.diag_export_button.clicked.connect(self.handle_export_diagnostics)
+
         self.clear_diag_button.clicked.connect(self.handle_clear_diagnostics)
 
         # install quick tooltip filter on the right-side label so tooltip appears immediately
@@ -1864,9 +1908,20 @@ class HelloWindow(QWidget):
         # IMPORTANT: Do NOT set tooltips or install the quick tooltip event filter on any
         # widgets that live in the left-side categories (div1). The left-side UI must not
         # show hover popups. Previously we copied the right-side tooltip to the div1 buttons
+
         # and installed the event filter here which produced hover tooltips in div1.
         # Leave div1 buttons/checks with no tooltip and no event filter to ensure hover
         # popups only appear when hovering the tool name in div2.
+
+        # Ensure the scan button reflects whether the newly-selected tool is running.
+        try:
+            if self.current_tool:
+                self._set_scan_button_state(
+                    self.current_tool.lower(),
+                    (self.current_tool.lower() in self._scan_running_tools),
+                )
+        except Exception:
+            pass
 
         # Switch the terminal tab to the selected tool (create the tab if it does not exist)
         try:
@@ -1899,6 +1954,13 @@ class HelloWindow(QWidget):
             ffuf_in = getattr(self.tool_name_box, "ffuf_top_input", None)
             if ffuf_in is not None:
                 storage["__ffuf_top_input__"] = ffuf_in.text().strip()
+            # Persist FFUF protocol selection if present
+            proto_w = getattr(self.tool_name_box, "protocol_widget", None)
+            if proto_w is not None:
+                try:
+                    storage["Protocol (http/https)"] = proto_w.currentText().strip()
+                except Exception:
+                    pass
             # Persist the rendered parameter order (so multi-run builds map checked flags by name)
             try:
                 storage["__param_order__"] = [
@@ -1949,6 +2011,15 @@ class HelloWindow(QWidget):
                     ffuf_in.setText(ffuf_val)
                 except Exception:
                     pass
+            # restore FFUF protocol if present
+            proto_w = getattr(self.tool_name_box, "protocol_widget", None)
+            if proto_w is not None:
+                try:
+                    proto_val = saved.get("Protocol (http/https)", "") or ""
+                    if proto_val:
+                        proto_w.setCurrentText(proto_val)
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -1964,10 +2035,38 @@ class HelloWindow(QWidget):
         if isinstance(line, str) and line.startswith("[scan complete]"):
             # make a friendly message and display it regardless of ffuf/progress filtering
             try:
-                # extract remainder after the sentinel
-                _, _, rest = line.partition("] ")
-                friendly = f"Scan complete: {rest.strip()}" if rest else "Scan complete"
-                self.append_line_signal.emit(tool_name.lower(), friendly + "\n")
+                # compute optional duration string (do not remove stored start time here)
+                dur_str = ""
+                try:
+                    start = self._scan_start_times.get(tool_name.lower(), None)
+                except Exception:
+                    start = None
+                if start is not None:
+                    try:
+                        dur = time.time() - float(start)
+                        if dur >= 3600:
+                            hrs = int(dur // 3600)
+                            mins = int((dur % 3600) // 60)
+                            secs = int(dur % 60)
+                            dur_str = f"{hrs}h{mins:02d}m{secs:02d}s"
+                        elif dur >= 60:
+                            mins = int(dur // 60)
+                            secs = int(dur % 60)
+                            dur_str = f"{mins}m{secs:02d}s"
+                        else:
+                            dur_str = f"{dur:.2f}s"
+                    except Exception:
+                        dur_str = ""
+
+                msg = f"[scan complete] {tool_name} finished."
+                if dur_str:
+                    msg += f" ({dur_str})"
+                # ensure an extra blank line after completion for readability
+                self.append_line_signal.emit(tool_name.lower(), msg + "\n\n")
+                try:
+                    self._scan_complete_sent.add(tool_name.lower())
+                except Exception:
+                    pass
             except Exception:
                 self.append_line_signal.emit(tool_name.lower(), line)
             # trigger parsing/other completion handlers
@@ -2043,6 +2142,41 @@ class HelloWindow(QWidget):
             or "completed" in line.lower()
             or ("[*] searching" in line.lower() and "finished" in line.lower())
         ):
+            # Try to show a scan-complete message with duration if we recorded a start time.
+            try:
+                # Peek at recorded start time for terminal-friendly duration text
+                # but do NOT remove it here so the GUI display can still show Duration.
+                start = self._scan_start_times.get(tool_name.lower(), None)
+            except Exception:
+                start = None
+            if start is not None:
+                try:
+                    dur = time.time() - float(start)
+                    if dur >= 3600:
+                        hrs = int(dur // 3600)
+                        mins = int((dur % 3600) // 60)
+                        secs = int(dur % 60)
+                        dur_str = f"{hrs}h{mins:02d}m{secs:02d}s"
+                    elif dur >= 60:
+                        mins = int(dur // 60)
+                        secs = int(dur % 60)
+                        dur_str = f"{mins}m{secs:02d}s"
+                    else:
+                        dur_str = f"{dur:.2f}s"
+                except Exception:
+                    dur_str = ""
+
+                try:
+                    msg = f"[scan complete] {tool_name} finished."
+                    if dur_str:
+                        msg += f" ({dur_str})"
+                    self.append_line_signal.emit(tool_name.lower(), msg + "\n\n")
+                    try:
+                        self._scan_complete_sent.add(tool_name.lower())
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
             self.parse_results_signal.emit(tool_name)
 
         # Specific completion detection for theHarvester
@@ -2051,6 +2185,39 @@ class HelloWindow(QWidget):
             and "[scan completed]" in line.lower()
             and "theharvester scan finished" in line.lower()
         ):
+            try:
+                # Peek at recorded start time for terminal-friendly duration text
+                # but do NOT remove it here so the GUI display can still show Duration.
+                start = self._scan_start_times.get(tool_name.lower(), None)
+            except Exception:
+                start = None
+            if start is not None:
+                try:
+                    dur = time.time() - float(start)
+                    if dur >= 3600:
+                        hrs = int(dur // 3600)
+                        mins = int((dur % 3600) // 60)
+                        secs = int(dur % 60)
+                        dur_str = f"{hrs}h{mins:02d}m{secs:02d}s"
+                    elif dur >= 60:
+                        mins = int(dur // 60)
+                        secs = int(dur % 60)
+                        dur_str = f"{mins}m{secs:02d}s"
+                    else:
+                        dur_str = f"{dur:.2f}s"
+                except Exception:
+                    dur_str = ""
+                try:
+                    msg = f"[scan complete] {tool_name} finished."
+                    if dur_str:
+                        msg += f" ({dur_str})"
+                    self.append_line_signal.emit(tool_name.lower(), msg + "\n\n")
+                    try:
+                        self._scan_complete_sent.add(tool_name.lower())
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
             self.parse_results_signal.emit(tool_name)
 
         # Request debounced parse on main thread for nslookup
@@ -2245,6 +2412,34 @@ class HelloWindow(QWidget):
                     self.send_to_terminal(
                         f"[Info] Using {domain_for_scan} for nslookup because Canonical names/Nameservers was selected.\r\n"
                     )
+        # Ensure FFUF protocol selection is included (visible radio or previously stored value)
+        if tool_key == "ffuf":
+            try:
+                proto_val = ""
+                # prefer visible widget
+                try:
+                    proto_w = getattr(self.tool_name_box, "protocol_widget", None)
+                    if proto_w:
+                        proto_val = proto_w.currentText().strip()
+                except Exception:
+                    proto_val = ""
+                # fallback to stored value
+                if not proto_val:
+                    proto_val = (
+                        (self.stored_param_values.get(self.current_tool, {}) or {})
+                        .get("Protocol (http/https)", "")
+                        .strip()
+                    )
+                if proto_val:
+                    params_list = parameters.setdefault(tool_key, [])
+                    # avoid duplicates
+                    if not any(
+                        isinstance(p, tuple) and p[0] == "Protocol (http/https)"
+                        for p in params_list
+                    ):
+                        params_list.insert(0, ("Protocol (http/https)", proto_val))
+            except Exception:
+                pass
 
         # build preview after injection
         command_preview = self.scan_handler.build_command_preview(
@@ -2258,6 +2453,18 @@ class HelloWindow(QWidget):
         if tool_key in self.results_manager.parsers:
             self.results_manager.parsers[tool_key].clear()
 
+        try:
+            # record start time BEFORE starting the worker to avoid races for very-fast scans
+            self._scan_start_times[tool_key] = time.time()
+            # start time recorded
+        except Exception:
+            pass
+        try:
+            # reset any previously-emitted complete flag for this tool
+            self._scan_complete_sent.discard(tool_key)
+        except Exception:
+            pass
+
         self.scan_handler.start_scan(
             domain_for_scan,
             [tool_key],
@@ -2268,6 +2475,11 @@ class HelloWindow(QWidget):
             tool_key,
             f"Started scan for {domain_for_scan} with {self.current_tool}.\r\n",
         )
+        # mark tool as running and update toggle button
+        try:
+            self._set_scan_button_state(tool_key, True)
+        except Exception:
+            pass
 
     def handle_scan_all(self):
         """Start scans for all left-side checked tools concurrently."""
@@ -2314,6 +2526,9 @@ class HelloWindow(QWidget):
             # Build parameters for each tool using currently stored checked param flags and stored input values.
             parameters = {}
             missing_required = []
+            tools_with_no_params = (
+                []
+            )  # collect tools that would run with zero parameters
             previews = {}
             for tool_label in selected:
                 tool_key = tool_label.lower()
@@ -2323,7 +2538,7 @@ class HelloWindow(QWidget):
                     tool_label, [False] * len(params_defs)
                 )
                 params_list = []
-                saved = self.stored_param_values.get(tool_label, {}) or {}
+
                 # choose required/optional lists for validation (mirror handle_start_scan)
                 current_value_required = []
                 current_value_optional = []
@@ -2344,17 +2559,43 @@ class HelloWindow(QWidget):
                     current_value_optional = []
                 elif tool_key == "dnsenum":
                     current_value_required = dnsenum_value_required
+                    current_value_optional = []
 
-                for idx, flag in enumerate(checked_flags):
-                    if not flag:
-                        continue
-                    name = params_defs[idx] if idx < len(params_defs) else None
-                    if not name:
+                # retrieve previously-saved user-entered values for this tool (including current tool just saved above)
+                saved_vals = self.stored_param_values.get(tool_label, {}) or {}
+
+                # Map checked flags by the rendered right-side order (saved in __param_order__) to avoid index mismatch
+                saved_order = saved_vals.get("__param_order__")
+                checked_by_name = {}
+                try:
+                    if (
+                        saved_order
+                        and isinstance(saved_order, list)
+                        and len(checked_flags) == len(saved_order)
+                    ):
+                        checked_by_name = {
+                            saved_order[i]: bool(checked_flags[i])
+                            for i in range(len(saved_order))
+                        }
+                    elif len(checked_flags) == len(params_defs):
+                        checked_by_name = {
+                            params_defs[i]: bool(checked_flags[i])
+                            for i in range(len(params_defs))
+                        }
+                    else:
+                        checked_by_name = {}
+                except Exception:
+                    checked_by_name = {}
+
+                # Build params_list consulting checked_by_name (name-based) to match UI ordering
+                for name in params_defs:
+                    if not checked_by_name.get(name, False):
                         continue
 
                     # If this parameter accepts a value, attempt to include stored value
                     if name in current_value_required or name in current_value_optional:
-                        val = saved.get(name, "") or ""
+                        # saved_vals holds previously persisted widget values for this tool
+                        val = saved_vals.get(name, "") or ""
                         if val:
                             params_list.append((name, val))
                         else:
@@ -2382,6 +2623,30 @@ class HelloWindow(QWidget):
                         ffuf_val = (saved.get("__ffuf_top_input__", "") or "").strip()
                     if ffuf_val:
                         params_list.insert(0, ("Wordlist", ffuf_val))
+                # Ensure FFUF protocol from stored values (or visible widget) is included in Scan All parameters
+                if tool_key == "ffuf":
+                    try:
+                        sv = ""
+                        # if this tool_label is the currently rendered tool, prefer visible widget
+                        try:
+                            if self.current_tool == tool_label and getattr(
+                                self.tool_name_box, "protocol_widget", None
+                            ):
+                                sv = (
+                                    self.tool_name_box.protocol_widget.currentText().strip()
+                                )
+                        except Exception:
+                            sv = ""
+                        if not sv:
+                            sv = (saved_vals.get("Protocol (http/https)") or "").strip()
+                        if sv:
+                            if not any(
+                                isinstance(p, tuple) and p[0] == "Protocol (http/https)"
+                                for p in params_list
+                            ):
+                                params_list.insert(0, ("Protocol (http/https)", sv))
+                    except Exception:
+                        pass
                 parameters[tool_key] = params_list
 
                 # create preview to check sudo hints
@@ -2398,6 +2663,13 @@ class HelloWindow(QWidget):
                 show_error_popup(self, msg)
                 return
 
+            # Block Scan All if any selected tools have no parameters checked.
+            if tools_with_no_params:
+                msg = "Scan All will not start because some selected tools have no parameters selected. Open each tool and select parameters or uncheck the tool:\n\n"
+                msg += "\n".join(tools_with_no_params)
+                show_error_popup(self, msg)
+                return
+
             # Clear parser state for each tool and start them all concurrently
             tool_keys = list(parameters.keys())
             for tk in tool_keys:
@@ -2408,6 +2680,19 @@ class HelloWindow(QWidget):
                         pass
 
             # Start the scans in one call (ScanHandler supports multiple tools)
+            try:
+                # record start times for each tool so we can show durations on completion
+                for tk in tool_keys:
+                    try:
+                        self._scan_start_times[tk] = time.time()
+                    except Exception:
+                        pass
+                    try:
+                        self._scan_complete_sent.discard(tk)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             self.scan_handler.start_scan(
                 domain,
                 tool_keys,
@@ -2415,13 +2700,55 @@ class HelloWindow(QWidget):
                 self.output_callback,
             )
 
+            # Mark each started tool as running and update UI state so switching to any of them
+            # shows the correct Start/Stop appearance immediately.
+            for tk in tool_keys:
+                try:
+                    # ensure we use the lowercase tool key expected by _set_scan_button_state
+                    self._set_scan_button_state(tk, True)
+                except Exception:
+                    pass
+
             # User feedback per-tab
             for tk in tool_keys:
                 self.send_to_terminal(
                     tk, f"Started scan for {domain} with {tk} (Scan All).\r\n"
                 )
+            # Update unified Scan Selected toggle appearance to reflect running selected tools
+            try:
+                self.update_scan_selected_button_state()
+            except Exception:
+                pass
         except Exception as e:
             show_error_popup(self, f"Failed to start Scan All:\n{str(e)}")
+
+    def handle_scan_selected_toggle(self):
+        """Toggle Start/Stop for checked left-side tools. If any selected tool is running, stop them; otherwise start them."""
+        try:
+            # Collect which tools are currently checked on the left
+            selected = [
+                tool
+                for tool, widget in self.collapsible_widgets.items()
+                if widget.is_tool_checked(tool)
+            ]
+            if not selected:
+                show_error_popup(
+                    self,
+                    "No tools checked on the left. Check tools you want to run with 'Scan Selected'.",
+                )
+                return
+            # If any of the selected tools are running, treat this as a Stop action
+            any_running = any(
+                (tool.lower() in self._scan_running_tools) for tool in selected
+            )
+            if any_running:
+                # stop all selected
+                self.handle_stop_selected()
+            else:
+                # start selected (reuse existing logic)
+                self.handle_scan_all()
+        except Exception:
+            pass
 
     def handle_stop_selected(self):
         """Stop selected scans (stop tools checked on the left that may still be running)."""
@@ -2454,6 +2781,11 @@ class HelloWindow(QWidget):
                     )
                 except Exception:
                     pass
+            # Refresh unified toggle appearance after stop attempts
+            try:
+                self.update_scan_selected_button_state()
+            except Exception:
+                pass
         except Exception as e:
             show_error_popup(self, f"Failed to stop selected scans:\n{str(e)}")
 
@@ -2464,6 +2796,11 @@ class HelloWindow(QWidget):
         if tool_key:
             # request worker to terminate the running tool
             self.scan_handler.stop_tool(tool_key)
+            # update running state for this tool
+            try:
+                self._set_scan_button_state(tool_key, False)
+            except Exception:
+                pass
         # user-visible notice (single line)
         self.send_to_terminal(
             tool_key or "general", f"Stopping Scan: {self.current_tool or 'tool'}.\r\n"
@@ -2520,6 +2857,11 @@ class HelloWindow(QWidget):
             # Immediately show successful parse
             self.display_parsed_results(result)
             self.update_diagnostics(result)
+            # mark tool as not running (scan complete) and update toggle button if it matches current tool
+            try:
+                self._set_scan_button_state(tool_name.lower(), False)
+            except Exception:
+                pass
         except Exception as e:
             self.send_to_terminal("general", f"Error parsing results: {str(e)}\r\n")
 
@@ -2556,6 +2898,41 @@ class HelloWindow(QWidget):
         self.results_textbox.append(
             f'<div style="font-size:10pt; color:#222; margin-bottom:6px;"><b>Timestamp:</b> {ts}</div>'
         )
+        # show duration if we recorded a start time for this tool
+        try:
+            start = self._scan_start_times.pop(result.tool_name.lower(), None)
+        except Exception:
+            start = None
+        if start is not None:
+            try:
+                dur = time.time() - float(start)
+                if dur >= 3600:
+                    hrs = int(dur // 3600)
+                    mins = int((dur % 3600) // 60)
+                    secs = int(dur % 60)
+                    dur_str = f"{hrs}h{mins:02d}m{secs:02d}s"
+                elif dur >= 60:
+                    mins = int(dur // 60)
+                    secs = int(dur % 60)
+                    dur_str = f"{mins}m{secs:02d}s"
+                else:
+                    dur_str = f"{dur:.2f}s"
+            except Exception:
+                dur_str = ""
+            # Also emit a terminal-visible scan-complete message with duration (if not already emitted)
+            try:
+                term_msg = f"(Duration: {dur_str})\r\n"
+                # add an extra CRLF so the terminal receives a blank line after completion
+                term_msg = f"(Duration: {dur_str})\r\n\r\n"
+                tk = result.tool_name.lower()
+                if tk not in self._scan_complete_sent:
+                    self.send_to_terminal(tk, term_msg)
+                    try:
+                        self._scan_complete_sent.add(tk)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         self.results_textbox.append("-" * 80)
         # Display tool-specific results
         if result.tool_name == "nmap":
@@ -3260,8 +3637,6 @@ class HelloWindow(QWidget):
             except Exception:
                 pass
 
-    # ...existing code...
-
     # =============================================================================================
     # =============================================================================================
     # =============================================================================================
@@ -3296,6 +3671,7 @@ class HelloWindow(QWidget):
                             self.results_textbox.append(f"  Title: {report['title']}")
                         if report.get("ip"):
                             self.results_textbox.append(f"  IP: {report['ip']}")
+
                 elif result.get("urls_scanned"):
                     for url_data in result.get("urls_scanned", []):
                         self.results_textbox.append(
@@ -3412,6 +3788,7 @@ class HelloWindow(QWidget):
                                 if kk and kk.lower() in kvals and vv not in (None, ""):
                                     return vv
             except Exception:
+
                 pass
 
             # Plain text header scan: look for "Key: Value" lines
@@ -3636,6 +4013,7 @@ class HelloWindow(QWidget):
                 "<tbody>"
             )
 
+            # Add email rows
             for email in result.emails:
                 source_display = email.source if email.source else "N/A"
                 parts.append(
@@ -3645,8 +4023,7 @@ class HelloWindow(QWidget):
                     "</tr>"
                 )
 
-            parts.append("</tbody></table>")
-            parts.append("</div>")
+            parts.append("</tbody></table></div>")
             self.results_textbox.append("".join(parts))
 
         # Display hosts/subdomains found in table format
@@ -3787,10 +4164,6 @@ class HelloWindow(QWidget):
         # Display host addresses in professional table format
         if hasattr(result, "host_addresses") and result.host_addresses:
             count = len(result.host_addresses)
-
-        # Display host addresses in professional table format
-        if hasattr(result, "host_addresses") and result.host_addresses:
-            count = len(result.host_addresses)
             label = f"Host Addresses ({count} address{'es' if count != 1 else ''}):"
 
             parts = []
@@ -3823,6 +4196,7 @@ class HelloWindow(QWidget):
                 "<tbody>"
             )
 
+            # Add host address rows
             for host in result.host_addresses:
                 ttl_display = (
                     str(host.ttl) if getattr(host, "ttl", None) is not None else "N/A"
@@ -4045,8 +4419,8 @@ class HelloWindow(QWidget):
                 parts.append(
                     "<tr>"
                     f'<td style="padding:6px; border:1px solid #ddd; word-break:break-word; width:40%; font-size:10pt;"><b>{net.ip_range}</b></td>'
-                    f'<td style="padding:6px; border:1px solid #ddd; word-break:break-word; width:30%; font-size:10pt;">{netblock_type}</td>'
-                    f'<td style="padding:6px; border:1px solid #ddd; word-break:break-word; width:30%; font-size:10pt;">{organization}</td>'
+                    f'<td style="padding:6px; border:1px solid #ddd; text-align:left; width:30%; font-size:10pt;">{netblock_type}</td>'
+                    f'<td style="padding:6px; border:1px solid #ddd; text-align:left; width:30%; font-size:10pt;">{organization}</td>'
                     "</tr>"
                 )
 
@@ -4452,14 +4826,14 @@ class HelloWindow(QWidget):
                         f'<div style="margin-left:12px; font-size:10pt;">• {contact}</div>'
                     )
 
-            if network.tech_contacts:
+        if network.tech_contacts:
+            self.results_textbox.append(
+                f'<span style="font-size:10pt;"><b>Technical Contacts:</b></span>'
+            )
+            for contact in network.tech_contacts:
                 self.results_textbox.append(
-                    f'<span style="font-size:10pt;"><b>Technical Contacts:</b></span>'
+                    f'<div style="margin-left:12px; font-size:10pt;">• {contact}</div>'
                 )
-                for contact in network.tech_contacts:
-                    self.results_textbox.append(
-                        f'<div style="margin-left:12px; font-size:10pt;">• {contact}</div>'
-                    )
         else:
             # Fallback display if parsing failed
             print(f"DEBUG: No proper domain_info or network_info, showing raw output")
@@ -4555,8 +4929,9 @@ class HelloWindow(QWidget):
         try:
             results = self.results_manager.get_all_results()
             if not results:
-                QMessageBox.information(
-                    self, "Export Results", "No results to export. Run a scan first."
+                # Use centralized popup helper
+                show_info_popup(
+                    self, "No results to export. Run a scan first.", "Export Results"
                 )
                 return
 
@@ -4572,17 +4947,17 @@ class HelloWindow(QWidget):
                 lf = filename.lower()
                 if lf.endswith(".csv"):
                     exported_file = self.results_manager.export_to_csv(filename)
-                    QMessageBox.information(
+                    show_info_popup(
                         self,
-                        "Export Complete",
                         f"Results exported to:\n{exported_file}",
+                        "Export Complete",
                     )
                 elif lf.endswith(".json"):
                     exported_file = self.results_manager.export_to_json(filename)
-                    QMessageBox.information(
+                    show_info_popup(
                         self,
-                        "Export Complete",
                         f"Results exported to:\n{exported_file}",
+                        "Export Complete",
                     )
                 elif lf.endswith(".pdf"):
                     # Build minimal HTML representation of parsed results and print to PDF
@@ -4613,22 +4988,22 @@ class HelloWindow(QWidget):
                         printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
                         printer.setOutputFileName(filename)
                         doc.print(printer)
-                        QMessageBox.information(
-                            self, "Export Complete", f"Results exported to:\n{filename}"
+                        show_info_popup(
+                            self, f"Results exported to:\n{filename}", "Export Complete"
                         )
                     except Exception as e:
-                        QMessageBox.critical(
-                            self, "Export Error", f"Failed to export PDF:\n{str(e)}"
+                        show_critical_popup(
+                            self, f"Failed to export PDF:\n{str(e)}", "Export Error"
                         )
                 else:
-                    QMessageBox.information(
+                    show_info_popup(
                         self,
-                        "Export Results",
                         "Unknown export type selected. Use .json, .csv or .pdf",
+                        "Export Results",
                     )
         except Exception as e:
-            QMessageBox.critical(
-                self, "Export Error", f"Failed to export results:\n{str(e)}"
+            show_critical_popup(
+                self, f"Failed to export results:\n{str(e)}", "Export Error"
             )
 
     def handle_export_diagnostics(self):
@@ -4636,9 +5011,7 @@ class HelloWindow(QWidget):
         try:
             diagnostics_text = self.diagnostics_textbox.toPlainText()
             if not diagnostics_text.strip():
-                QMessageBox.information(
-                    self, "Export Diagnostics", "No diagnostics to export."
-                )
+                show_info_popup(self, "No diagnostics to export.", "Export Diagnostics")
                 return
 
             # Offer PDF as an export option in addition to plain text
@@ -4664,30 +5037,30 @@ class HelloWindow(QWidget):
                     printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
                     printer.setOutputFileName(filename)
                     doc.print(printer)
-                    QMessageBox.information(
-                        self, "Export Complete", f"Diagnostics exported to:\n{filename}"
+                    show_info_popup(
+                        self, f"Diagnostics exported to:\n{filename}", "Export Complete"
                     )
                 except Exception as e:
-                    QMessageBox.critical(
+                    show_critical_popup(
                         self,
-                        "Export Error",
                         f"Failed to export diagnostics to PDF:\n{str(e)}",
+                        "Export Error",
                     )
             else:
                 # Fallback: write plain text file
                 try:
                     with open(filename, "w", encoding="utf-8") as f:
                         f.write(diagnostics_text)
-                    QMessageBox.information(
-                        self, "Export Complete", f"Diagnostics exported to:\n{filename}"
+                    show_info_popup(
+                        self, f"Diagnostics exported to:\n{filename}", "Export Complete"
                     )
                 except Exception as e:
-                    QMessageBox.critical(
-                        self, "Export Error", f"Failed to export diagnostics:\n{str(e)}"
+                    show_critical_popup(
+                        self, f"Failed to export diagnostics:\n{str(e)}", "Export Error"
                     )
         except Exception as e:
-            QMessageBox.critical(
-                self, "Export Error", f"Failed to export diagnostics:\n{str(e)}"
+            show_critical_popup(
+                self, f"Failed to export diagnostics:\n{str(e)}", "Export Error"
             )
 
     def handle_clear_results(self):
@@ -4751,6 +5124,86 @@ class HelloWindow(QWidget):
                 page = target_view.page()
                 if page:
                     page.runJavaScript(f"window.term.write({json.dumps(text)})")
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    # --- New helpers for scan button state ---
+    def handle_scan_toggle(self):
+        """Called when the single scan_button is clicked — start or stop current tool."""
+        try:
+            if not self.current_tool:
+                show_error_popup(self, "Please select a tool before scanning.")
+                return
+            tk = (self.current_tool or "").lower()
+            if tk in self._scan_running_tools:
+                # currently running -> stop
+                self.handle_stop_scan()
+            else:
+                # currently not running -> start
+                self.handle_start_scan()
+        except Exception:
+            pass
+
+    def update_scan_selected_button_state(self):
+        """Set unified Scan Selected button appearance based on whether any left-checked tools are running."""
+        try:
+            # Determine currently-checked left-side tools
+            selected = [
+                tool
+                for tool, widget in self.collapsible_widgets.items()
+                if widget.is_tool_checked(tool)
+            ]
+            any_running = any(
+                (tool.lower() in self._scan_running_tools) for tool in selected
+            )
+            if any_running:
+                self.scan_selected_btn.setText("Stop Selected")
+                self.scan_selected_btn.setStyleSheet(self._scan_selected_stop_style)
+            else:
+                self.scan_selected_btn.setText("Scan Selected")
+                self.scan_selected_btn.setStyleSheet(self._scan_selected_start_style)
+        except Exception:
+            pass
+
+    def _set_scan_button_state(self, tool_key, running: bool):
+        """Update internal running set and the toggle button appearance.
+        tool_key should be lowercase. Only update the visible button if it refers to the current tool.
+        """
+        try:
+            if not tool_key:
+                return
+            key = tool_key.lower()
+            if running:
+                self._scan_running_tools.add(key)
+            else:
+                self._scan_running_tools.discard(key)
+
+            # If the button exists and the tool matches the currently selected tool, update appearance
+            if getattr(self, "scan_button", None):
+                cur = (
+                    (self.current_tool or "").lower()
+                    if getattr(self, "current_tool", None)
+                    else ""
+                )
+                if cur and cur == key:
+                    if running:
+                        self.scan_button.setText("Stop Tool")
+                        self.scan_button.setStyleSheet(self._scan_stop_style)
+                    else:
+                        self.scan_button.setText("Start Tool")
+                        self.scan_button.setStyleSheet(self._scan_start_style)
+                else:
+                    # if current tool not running, ensure button shows Start for the UI's selected tool
+                    if cur and cur not in self._scan_running_tools:
+                        self.scan_button.setText("Start Tool")
+                        self.scan_button.setStyleSheet(self._scan_start_style)
+
+            # Ensure unified "Scan Selected" toggle reflects current running state of checked tools
+            try:
+                if getattr(self, "scan_selected_btn", None):
+                    self.update_scan_selected_button_state()
             except Exception:
                 pass
         except Exception:

@@ -2,16 +2,15 @@ from .tool_process_base import ToolProcessBase
 import os
 import re
 
-# parameters that require a user-supplied value (UI should show QLineEdit)
+# parameters that require a user-supplied value (UI should show QLineEdit / combobox)
 value_required = [
     "Status codes",  # -mc  (e.g. 200,301)
     "Extension fuzz",  # -e   (e.g. .php,.html)
     "Depth limit",  # -recursion-depth (number)
     "Rate limit",  # -rate (number)
-    "Size filter",  # -fs  (bytes)
     "Time filter",  # -maxtime (seconds)
-    "Custom matcher",  # -m   (matcher string)
     "Filter code",  # -fc  (filter by HTTP response code)
+    "Protocol (http/https)",  # UI-controlled protocol selection; default: https
 ]
 
 
@@ -25,11 +24,10 @@ class FFUFToolProcess(ToolProcessBase):
         "Extension fuzz": "-e",  # Requires extension(s) (value)
         "Depth limit": "-recursion-depth",  # Requires a number (value)
         "Rate limit": "-rate",  # Requires a number (value)
-        "Size filter": "-fs",  # Requires size (value)
         "Time filter": "-maxtime",  # Requires time (value)
         "Follow redirects": "-r",
         "Ignore SSL": "-k",
-        "Custom matcher": "-m",  # Requires matcher string (value)
+        # removed "Size filter" (-fs) and "Custom matcher" (-m)
     }
 
     # optional fallback defaults if UI path not provided
@@ -112,11 +110,25 @@ class FFUFToolProcess(ToolProcessBase):
                 # ffuf <target> -h (leave target as provided)
                 return ["ffuf", self.target, "-h"]
 
-        # ensure URL scheme (tool-specific): default to https:// when missing,
-        # then ensure target contains /FUZZ
-        target = self.target
+        # Respect explicit scheme in the provided target. If missing, use chosen protocol (default https).
+        target = self.target.strip()
+
+        # Determine protocol selection from params (default to https)
+        protocol = "https"
+        for p in self.params:
+            if isinstance(p, tuple):
+                name, value = p
+                if name == "Protocol (http/https)":
+                    v = (value or "").strip().lower()
+                    if v in ("http", "https"):
+                        protocol = v
+                    break
+
+        # Only prefix protocol if target has no scheme already
         if not re.match(r"^[a-zA-Z][a-zA-Z0-9+\-.]*://", target):
-            target = "https://" + target
+            target = f"{protocol}://{target}"
+
+        # ensure target contains /FUZZ
         fuzz_target = target
         if "FUZZ" not in fuzz_target:
             fuzz_target = fuzz_target.rstrip("/") + "/FUZZ"
