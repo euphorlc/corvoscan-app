@@ -40,6 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopengl0 \
     libxcb-cursor0 \
     libxcb-icccm4 \
+    libevent-2.1-7 \
     libxcb-image0 \
     libxcb-keysyms1 \
     libxcb-randr0 \
@@ -97,6 +98,11 @@ RUN NMAP_REAL=$(readlink -f /usr/bin/nmap) \
 RUN useradd -m -s /bin/bash corvo
 
 WORKDIR /home/corvo/app
+
+RUN mkdir -p /home/corvo/qtwebengine_dictionaries \
+    && chown -R corvo:corvo /home/corvo/qtwebengine_dictionaries
+
+ENV QTWEBENGINE_DICTIONARIES_PATH=/home/corvo/qtwebengine_dictionaries
 
 # ---------------------------------------------------------------
 # PYTHON DEPENDENCIES
