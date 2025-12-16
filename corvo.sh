@@ -10,6 +10,7 @@ RULES_DIR="$(pwd)/rulesets"
 
 # Create output directory for results persistence
 mkdir -p "$OUTPUT_DIR"
+mkdir -p "$RULES_DIR"
 
 # Detect Kernel Info
 KERNEL_NAME=$(uname -s)
@@ -19,6 +20,7 @@ KERNEL_RELEASE=$(uname -r)
 DISPLAY_VAR="$DISPLAY"
 X11_MOUNT=""
 NET_FLAGS="--net=host"
+RENDER_FLAGS=""
 
 echo "[-] Detecting environment..."
 
@@ -41,10 +43,11 @@ elif [[ "$KERNEL_NAME" == "Darwin" ]]; then
 
     # Configure Security (Allow localhost to talk to XQuartz)
     echo "    > Configuring XQuartz permissions..."
-    xhost + 127.0.0.1 > /dev/null 2>&1
+    xhost +localhost > /dev/null 2>&1
 
     # Docker Magic Hostname for Mac
     DISPLAY_VAR="host.docker.internal:0"
+    RENDER_FLAGS="-e QT_XCB_GL_INTEGRATION=none -e QT_QUICK_BACKEND=software -e LIBGL_ALWAYS_SOFTWARE=1"
 
     NET_FLAGS=""
     X11_MOUNT=""
@@ -85,8 +88,10 @@ docker run -it --rm \
     --cap-add=NET_RAW \
     --cap-add=NET_ADMIN \
     -e DISPLAY="$DISPLAY_VAR" \
+    $RENDER_FLAGS \
     $X11_MOUNT \
     -v "$OUTPUT_DIR":/home/corvo/app/output \
+    -v "$RULES_DIR":/home/corvo/app/rulesets \
     "$APP_NAME"
 
 echo "[+] CorvoScan closed."

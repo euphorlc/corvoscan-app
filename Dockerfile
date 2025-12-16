@@ -34,35 +34,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     theharvester \
     dnsenum \
     nmap \
-    # GUI & Qt6 Dependencies (CRITICAL)
-    libgl1 \
-    libegl1 \
-    libopengl0 \
-    libxcb-cursor0 \
-    libxcb-icccm4 \
-    libevent-2.1-7 \
-    libxcb-image0 \
-    libxcb-keysyms1 \
-    libxcb-randr0 \
-    libxcb-render-util0 \
-    libxcb-shape0 \
-    libxkbcommon-x11-0 \
-    libdbus-1-3 \
-    libfontconfig1 \
-    libnss3 \
-    libasound2t64 \
-    libxkbfile1 \
-    libatomic1 \
-    libglib2.0-0 \
-    libxext6 \
-    libxrender1 \
-    libxcomposite1 \
-    libxcursor1 \
-    libxdamage1 \
-    libxi6 \
-    libxtst6 \
-    libxrandr2 \
+    # Extra packages
     libcap2-bin \
+    libxcb-cursor0 \
+    libxcb-xinerama0 \
+    libxkbcommon-x11-0 \
+    # GRAPHICS & RENDERING (Fixes libGL.so.1 error)
+    libgl1 \
+    libgl1-mesa-dri \
+    libglx0 \
+    libglib2.0-0 \
+    # DBUS (Fixes the "Failed to connect to socket" warning)
+    dbus \
+    dbus-x11 \
+    # Native pyQT6 packages
+    python3-pyqt6 \
+    python3-pyqt6.qtwebengine \
     # Clean up to keep image smaller
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -101,15 +88,24 @@ WORKDIR /home/corvo/app
 
 RUN mkdir -p /home/corvo/qtwebengine_dictionaries \
     && chown -R corvo:corvo /home/corvo/qtwebengine_dictionaries
-
 ENV QTWEBENGINE_DICTIONARIES_PATH=/home/corvo/qtwebengine_dictionaries
 
 # ---------------------------------------------------------------
 # PYTHON DEPENDENCIES
 # ---------------------------------------------------------------
 COPY requirements.txt /home/corvo/app/requirements.txt
-
+RUN sed -i '/PyQt6/d' /home/corvo/app/requirements.txt
 RUN pip3 install --no-cache-dir -r requirements.txt --break-system-packages
+
+# ---------------------------------------------------------------
+# RUNTIME CONFIGURATION
+# ---------------------------------------------------------------
+
+# Disable GPU acceleration and sandboxing (Required for Docker)
+ENV QTWEBENGINE_CHROMIUM_FLAGS="--no-sandbox --disable-gpu --disable-software-rasterizer"
+
+# Fix DBus uuid error
+RUN dbus-uuidgen > /var/lib/dbus/machine-id
 
 # ---------------------------------------------------------------
 # APPLICATION SETUP

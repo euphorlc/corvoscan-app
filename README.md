@@ -46,7 +46,11 @@ _Note: The first run will take a few minutes to download the image. Subsequent r
 1. Install XQuartz: brew install --cask xquartz
 2. Open XQuartz > Settings > Security.
 3. Check "Allow connections from network clients".
-4. Restart XQuartz (or log out/in) before running the script.
+4. Enable IGLX (Required for Rendering): Run this command in your terminal to fix blank window issues:
+```bash
+defaults write org.xquartz.X11 enable_iglx -bool true
+```
+5. Restart XQuartz (Quit fully via Cmd+Q and reopen) before running the script.
 
 ## 🛠️ For Developers
 If you want to contribute to CorvoScan, you can use our "Hot Reload" mode to see changes without rebuilding the image.

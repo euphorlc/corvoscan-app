@@ -25,21 +25,38 @@ mkdir -p "$OUTPUT_DIR"
 mkdir -p "$RULES_DIR"
 
 # Detect Environment (Linux vs WSL2)
+OS_TYPE=$(uname -s)
 KERNEL_RELEASE=$(uname -r)
-DISPLAY_VAR="$DISPLAY"
 MOUNT_ARGS=""
+DISPLAY_VAR=""
 
 echo "[-] Starting CorvoScan in DEVELOPMENT MODE..."
 echo "    > Source code mapped: $SOURCE_DIR"
 
-if [[ "$KERNEL_RELEASE" == *"WSL2"* ]]; then
+if [ "$OS_TYPE" == "Darwin" ]; then
+    # --- MACOS CONFIGURATION ---
+    echo "    > Environment: macOS (Apple Silicon/Intel)"
+
+    # 1. Allow docker to connect to XQuartz
+    xhost +localhost > /dev/null 2>&1
+
+    # 2. Use the special Docker-for-Mac host DNS
+    DISPLAY_VAR="host.docker.internal:0"
+
+    # 3. macOS doesn't use the X11 socket mount, it uses Network
+    MOUNT_ARGS=""
+
+elif [[ "$KERNEL_RELEASE" == *"WSL2"* ]]; then
+    # --- WSL2 CONFIGURATION ---
     echo "    > Environment: WSL2 (WSLg)"
     MOUNT_ARGS="-v /mnt/wslg:/mnt/wslg -v /tmp/.X11-unix:/tmp/.X11-unix"
     DISPLAY_VAR=":0"
+
 else
+    # --- NATIVE LINUX CONFIGURATION ---
     echo "    > Environment: Native Linux"
     MOUNT_ARGS="-v /tmp/.X11-unix:/tmp/.X11-unix"
-
+    DISPLAY_VAR="$DISPLAY"
     xhost +local:docker > /dev/null 2>&1
 fi
 
@@ -54,6 +71,9 @@ docker run -it --rm \
     --cap-add=NET_ADMIN \
     -e DISPLAY="$DISPLAY_VAR" \
     -e QT_DEBUG_PLUGINS=1 \
+    -e QT_XCB_GL_INTEGRATION=none \
+    -e QT_QUICK_BACKEND=software \
+    -e LIBGL_ALWAYS_SOFTWARE=1 \
     $MOUNT_ARGS \
     -v "$SOURCE_DIR":/home/corvo/app \
     -v "$OUTPUT_DIR":/home/corvo/app/output \
