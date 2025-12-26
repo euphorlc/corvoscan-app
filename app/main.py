@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QRadioButton,
     QButtonGroup,
+    QMessageBox,
 )
 from PyQt6.QtWidgets import QToolTip
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -45,6 +46,7 @@ from src.popup_utils import (
     show_terminal_clear_choice,
     show_info_popup,
     show_critical_popup,
+    show_confirm_new_scan,
 )
 from src.results_parser import ResultsManager
 from src.parsers.nmap_parser import NmapResultsParser
@@ -203,12 +205,21 @@ class RadioChoiceWidget(QWidget):
 
 
 class CollapsibleCategory(QWidget):
-
     def __init__(self, title, tools, callback, highlight_callback):
         super().__init__()
         self.tools = tools
         self.callback = callback
         self.highlight_callback = highlight_callback
+        # Define tool descriptions (short and concise)
+        self.tool_descriptions = {
+            "Whois": "Query domain registration info",
+            "NSLookup": "Query DNS records",
+            "theHarvester": "Gather emails & subdomains",
+            "DNSEnum": "Enumerate DNS records",
+            "NMAP": "Network & port scanning",
+            "WhatWeb": "Fingerprint web tech",
+            "FFUF": "Directory & file fuzzing",
+        }
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setSpacing(0)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
@@ -305,8 +316,20 @@ class CollapsibleCategory(QWidget):
                     btn.click() if state == 2 else None
                 )
             )
+
+            # Add description label
+            desc_label = QLabel(self.tool_descriptions.get(tool_name, ""))
+            desc_label.setStyleSheet(
+                "font-size: 11px; color: #666; font-style: italic;"
+            )
+            desc_label.setWordWrap(True)
+            desc_label.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+            )
+
             row.addWidget(checkbox)
             row.addWidget(button)
+            row.addWidget(desc_label, stretch=1)
             content_layout.addLayout(row)
             self.tool_buttons.append((checkbox, button))
 
@@ -383,7 +406,6 @@ class CollapsibleCategory(QWidget):
 
 
 class ToolNameBox(QFrame):
-
     # ... Displays tool name, description, and parameter checkboxes ...
     def __init__(self, tool_name, description, parameters, checked_params):
         super().__init__()
@@ -401,7 +423,7 @@ class ToolNameBox(QFrame):
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
         layout.setContentsMargins(16, 12, 16, 12)
-        self.tool_name_label = QLabel(tool_name)
+        self.tool_name_label = QLabel(f"(i){tool_name}")
         # slightly smaller tool title to free space for terminal
         self.tool_name_label.setStyleSheet("font-size: 16px; font-weight: bold;")
         self.tool_name_label.setSizePolicy(
@@ -1278,9 +1300,127 @@ class HelloWindow(QWidget):
         str
     )  # new signal to request debounced parse on main thread
 
+    def _confirm_new_scan_and_clear(self) -> bool:
+        """Ask the user to confirm starting a new scan and clear all previous scans if confirmed."""
+        try:
+            # Only show dialog if terminals have content
+            if not self._any_terminal_has_content():
+                self._clear_all_previous_scans()
+                return True
+
+            # Use the styled confirmation popup
+            if show_confirm_new_scan(self):
+                self._clear_all_previous_scans()
+                return True
+        except Exception as e:
+            # Print error for debugging
+            print(f"Error in confirmation dialog: {e}")
+            return False
+        return False
+
+    def _any_terminal_has_content(self) -> bool:
+        """Return True if any terminal tab has visible content."""
+        try:
+            return any(
+                bool(v) for v in getattr(self, "_terminal_has_content", {}).values()
+            )
+        except Exception:
+            return False
+
+    def _mark_terminal_has_content(self, key: str, text: str):
+        """Mark the terminal tab identified by key as having visible content if text is not just ANSI/whitespace."""
+        try:
+            if not key:
+                return
+            # Strip ANSI escape sequences
+            try:
+                ansi_re = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
+                stripped = ansi_re.sub("", text or "")
+            except Exception:
+                stripped = str(text or "")
+            # Remove CR/LF and check if any non-whitespace remains
+            stripped = stripped.replace("\r", "").replace("\n", "")
+            has_visible = bool(stripped.strip())
+            if has_visible:
+                self._terminal_has_content[key] = True
+        except Exception:
+            pass
+
+    def _clear_all_previous_scans(self):
+        """Clear terminal tabs, results/diagnostics UI, and reset stored results/state."""
+        try:
+            # Clear all terminal tabs
+            for view in list(self.terminal_views.values()):
+                try:
+                    if view and hasattr(view, "page") and view.page():
+                        view.page().runJavaScript("window.term.clear()")
+                except Exception:
+                    pass
+
+            # Clear Results and Diagnostics panes
+            try:
+                self.results_textbox.clear()
+            except Exception:
+                pass
+            try:
+                self.diagnostics_textbox.clear()
+            except Exception:
+                pass
+
+            # Reset duplicate tracking and parser results
+            try:
+                self.displayed_results.clear()
+            except Exception:
+                pass
+            try:
+                self.results_manager.clear_results()
+            except Exception:
+                pass
+
+            # Stop and clear any pending parse timers/failure timers
+            try:
+                for t in list(self._parse_timers.values()):
+                    try:
+                        t.stop()
+                        t.deleteLater()
+                    except Exception:
+                        pass
+                self._parse_timers.clear()
+            except Exception:
+                pass
+            try:
+                for t in list(self._parse_failure_timers.values()):
+                    try:
+                        t.stop()
+                        t.deleteLater()
+                    except Exception:
+                        pass
+                self._parse_failure_timers.clear()
+            except Exception:
+                pass
+
+            # Reset scan state trackers
+            try:
+                self._scan_start_times.clear()
+            except Exception:
+                pass
+            try:
+                self._scan_complete_sent.clear()
+            except Exception:
+                pass
+            try:
+                self._last_progress_len.clear()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("CorvoScan")
+        # Set darker background for the main window
+        self.setStyleSheet("QWidget#MainWindow { background-color: #e6e6e6; }")
+        self.setObjectName("MainWindow")
         # create the quick tooltip filter instance
         self._tooltip_filter = QuickTooltipFilter(self)
         screen = QGuiApplication.primaryScreen()
@@ -1309,20 +1449,18 @@ class HelloWindow(QWidget):
         top_layout.setSpacing(20)
         self.tools_data = {
             "Whois": {
-                "description": "Whois: Query domain registration info.",
+                "description": "Whois queries domain registration databases to retrieve detailed ownership and administrative information about domains and IP addresses. Use it to discover registrar details, registration/expiration dates, nameservers, administrative contacts, and network allocation data. Essential for identifying domain ownership, investigating suspicious domains, and gathering intelligence about network infrastructure.",
                 "parameters": [
-                    "Default scan",  # default/no-op choice — checked = no flag added
+                    "Default scan",
                     "WHOIS server (-h)",
                     "Port (-p)",
                     "Display referral chain (-I)",
-                    # "Query all objects (-a)",   # commented out per request
-                    # "Exact match only (-x)",    # commented out per request
                     "Verbose output (--verbose)",
-                    "Suppress legal disclaimers (-H)",  # <-- restored -H into UI list
+                    "Suppress legal disclaimers (-H)",
                 ],
             },
             "NSLookup": {
-                "description": "NSLookup: Query DNS records for a domain.",
+                "description": "NSLookup (Name Server Lookup) queries DNS servers to resolve domain names to IP addresses and retrieve various DNS record types. Use it to discover mail servers (MX), nameservers (NS), IPv4/IPv6 addresses, TXT records (SPF, DKIM, DMARC), canonical names (CNAME), and authoritative DNS information. Critical for DNS troubleshooting, email security verification, and discovering infrastructure details.",
                 "parameters": [
                     "IPv4 addresses (A)",
                     "IPv6 addresses (AAAA)",
@@ -1334,7 +1472,7 @@ class HelloWindow(QWidget):
                 ],
             },
             "theHarvester": {
-                "description": "theHarvester: Gather emails and subdomains.",
+                "description": "theHarvester is an OSINT (Open Source Intelligence) tool that aggregates data from multiple public sources to discover email addresses, subdomains, employee names, open ports, and banners. It queries search engines, certificate transparency logs, public databases, and social media to gather reconnaissance data. Ideal for penetration testing reconnaissance, attack surface mapping, and social engineering preparation.",
                 "parameters": [
                     "[REQUIRED] Source (-b, --source)",
                     "Limit (-l, --limit)",
@@ -1347,18 +1485,17 @@ class HelloWindow(QWidget):
                 ],
             },
             "DNSEnum": {
-                "description": "DNSEnum: Enumerate DNS records.",
+                "description": "DNSEnum performs comprehensive DNS enumeration by gathering nameservers, mail servers, zone transfers, subdomain brute-forcing, reverse lookups, and WHOIS queries. It automatically discovers network ranges and performs targeted DNS reconnaissance to map out an organization's DNS infrastructure. Perfect for thorough DNS auditing, discovering hidden subdomains, and identifying misconfigurations in DNS security.",
                 "parameters": [
                     "Basic run",
                     "Verbose output (-v)",
                     "Skip PTR (--noreverse)",
-                    "Enable brute force",  # NEW: when checked, dnsenum will perform brute-force (no automatic -f emptywordlist)
+                    "Enable brute force",
                     "DNS server (--dnsserver <IP>)",
-                    # "Concurrency (-p <n>)",  # COMMENTED OUT: removed from UI options
                 ],
             },
             "NMAP": {
-                "description": "NMAP: Network mapping and port scanning",
+                "description": "Nmap (Network Mapper) is the industry-standard network scanning and security auditing tool. It discovers live hosts, open ports, running services, operating systems, and potential vulnerabilities. Use it for network inventory, security audits, penetration testing, and compliance verification. Supports advanced techniques like stealth scanning, service version detection, OS fingerprinting, and NSE scripting for vulnerability detection.",
                 "parameters": [
                     "Fast scan (-F)",
                     "Service detection (-sV)",
@@ -1372,7 +1509,7 @@ class HelloWindow(QWidget):
                 ],
             },
             "WhatWeb": {
-                "description": "WhatWeb: Fingerprint web technologies.",
+                "description": "WhatWeb identifies web technologies, content management systems (WordPress, Joomla, Drupal), frameworks (Angular, React, Vue), server software (Apache, Nginx, IIS), analytics platforms, and security headers. It detects over 1800+ plugins to fingerprint websites and reveal their technology stack. Essential for web application reconnaissance, vulnerability research, and security assessments of web infrastructure.",
                 "parameters": [
                     "Default scan",
                     "Verbose (-v)",
@@ -1382,13 +1519,12 @@ class HelloWindow(QWidget):
                     "Header (--header)",
                     "Wait (--wait)",
                     "Max threads (--max-threads)",
-                    # removed "User-Agent (--user-agent)" and "Header (--header)"
                 ],
             },
             "FFUF": {
-                "description": "FFUF: Directory and file fuzzing.",
+                "description": "FFUF (Fuzz Faster U Fool) is a high-performance web fuzzer for discovering hidden directories, files, subdomains, parameters, and virtual hosts. It uses wordlists to rapidly brute-force URLs and supports recursive fuzzing, custom headers, POST data, and advanced filtering by status codes, response size, or content patterns. Crucial for web application penetration testing, API endpoint discovery, and finding exposed sensitive files.",
                 "parameters": [
-                    "Protocol (http/https)",  # moved before Default scan and marked required (hidden checkbox + radio)
+                    "Protocol (http/https)",
                     "Default scan",
                     "Recursion",
                     "Status codes",
@@ -1562,6 +1698,7 @@ class HelloWindow(QWidget):
         self.terminal_tabs = QTabWidget()
         self.terminal_tabs.setTabsClosable(False)
         self.terminal_views = {}
+        self._terminal_has_content = {}
 
         project_root = os.path.dirname(os.path.abspath(__file__))
         xterm_path = os.path.join(project_root, "xterm.html")
@@ -1572,9 +1709,7 @@ class HelloWindow(QWidget):
                <pre>{}</pre>
                <p>The terminal preview has been disabled. Raw output will still appear in the terminal view.</p>
            </body></html>
-        """.format(
-            xterm_path
-        )
+        """.format(xterm_path)
 
         # Pre-create one tab per tool in self.tools_data (preserves insertion order)
         for tool_label in self.tools_data.keys():
@@ -1586,7 +1721,10 @@ class HelloWindow(QWidget):
             # label the tab with the human-readable tool name
             self.terminal_tabs.addTab(view, tool_label)
             # map by lowercase key for routing (e.g., "nmap" -> view)
-            self.terminal_views[tool_label.lower()] = view
+            tool_key = tool_label.lower()
+            self.terminal_views[tool_key] = view
+            # initialize content marker for this tab
+            self._terminal_has_content[tool_key] = False
             # connect readiness (safe to connect for every view)
             try:
                 view.loadFinished.connect(self.on_terminal_ready)
@@ -1766,13 +1904,13 @@ class HelloWindow(QWidget):
         diagnostics_layout.setSpacing(10)
         diagnostics_layout.setContentsMargins(10, 10, 10, 10)
         diagnostics_layout.addWidget(
-            create_division_title("Diagnostics"),
+            create_division_title("Insights"),
             0,
             alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
         )
         self.diagnostics_textbox = QTextEdit()
         self.diagnostics_textbox.setReadOnly(True)
-        self.diagnostics_textbox.setPlaceholderText("Diagnostics will appear here.")
+        self.diagnostics_textbox.setPlaceholderText("Insights will appear here.")
         # diagnostics styling: reuse results scroll CSS
         self.diagnostics_textbox.setStyleSheet(RESULTS_SCROLLBAR_STYLE)
         diagnostics_layout.addWidget(self.diagnostics_textbox, stretch=1)
@@ -1783,8 +1921,8 @@ class HelloWindow(QWidget):
             "font-size: 16px; border-radius: 8px; background: #1976d2; color: white; font-weight: bold; padding: 8px 24px;"
         )
         diag_export_row.addWidget(self.diag_export_button)
-        # Clear diagnostics button
-        self.clear_diag_button = QPushButton("Clear Diagnostics")
+        # Clear insights button
+        self.clear_diag_button = QPushButton("Clear Insights")
         self.clear_diag_button.setStyleSheet(
             "font-size: 16px; border-radius: 8px; background: #757575; color: white; font-weight: bold; padding: 8px 24px;"
         )
@@ -2441,6 +2579,13 @@ class HelloWindow(QWidget):
             except Exception:
                 pass
 
+        # Confirm and clear before starting a new scan (clears terminals & previous results)
+        try:
+            if not self._confirm_new_scan_and_clear():
+                return
+        except Exception:
+            return
+
         # build preview after injection
         command_preview = self.scan_handler.build_command_preview(
             domain_for_scan, tool_key, parameters[tool_key]
@@ -2526,9 +2671,7 @@ class HelloWindow(QWidget):
             # Build parameters for each tool using currently stored checked param flags and stored input values.
             parameters = {}
             missing_required = []
-            tools_with_no_params = (
-                []
-            )  # collect tools that would run with zero parameters
+            tools_with_no_params = []  # collect tools that would run with zero parameters
             previews = {}
             for tool_label in selected:
                 tool_key = tool_label.lower()
@@ -2632,9 +2775,7 @@ class HelloWindow(QWidget):
                             if self.current_tool == tool_label and getattr(
                                 self.tool_name_box, "protocol_widget", None
                             ):
-                                sv = (
-                                    self.tool_name_box.protocol_widget.currentText().strip()
-                                )
+                                sv = self.tool_name_box.protocol_widget.currentText().strip()
                         except Exception:
                             sv = ""
                         if not sv:
@@ -2668,6 +2809,13 @@ class HelloWindow(QWidget):
                 msg = "Scan All will not start because some selected tools have no parameters selected. Open each tool and select parameters or uncheck the tool:\n\n"
                 msg += "\n".join(tools_with_no_params)
                 show_error_popup(self, msg)
+                return
+
+            # Confirm and clear before starting a new scan (clears terminals & previous results)
+            try:
+                if not self._confirm_new_scan_and_clear():
+                    return
+            except Exception:
                 return
 
             # Clear parser state for each tool and start them all concurrently
@@ -3039,7 +3187,7 @@ class HelloWindow(QWidget):
                 f'<div style="font-weight:bold; font-size:10pt; margin-top:6px;">Port Discovery ({len(result.ports)} found):</div>'
             )
             parts.append(
-                '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0;">'
+                '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0; box-shadow: 0 2px 8px rgba(0,0,0,0.15); border-radius: 4px;">'
             )
             parts.append(
                 '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; table-layout:fixed; width:100%;">'
@@ -3158,7 +3306,7 @@ class HelloWindow(QWidget):
                             f'<div style="margin-top:8px; margin-left:12px; font-size:10pt;"><b>Per-request details ({port.port}/{port.protocol}):</b></div>'
                         )
                         parts.append(
-                            '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; margin-top:6px; margin-left:12px;">'
+                            '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; margin-top:6px; margin-left:12px; box-shadow: 0 2px 6px rgba(0,0,0,0.12); border-radius: 4px;">'
                         )
                         parts.append(
                             '<table width="98%" cellpadding="6" cellspacing="0" style="border-collapse:collapse; border:1px solid #ddd;">'
@@ -3179,7 +3327,9 @@ class HelloWindow(QWidget):
                         )
                         for r in reqs:
                             p_proto = (
-                                f"{r.get('port','')}/{r.get('protocol','')}".strip("/")
+                                f"{r.get('port', '')}/{r.get('protocol', '')}".strip(
+                                    "/"
+                                )
                             )
                             state = r.get("state", "") or "N/A"
                             service = r.get("service", "") or ""
@@ -3460,7 +3610,7 @@ class HelloWindow(QWidget):
                     '<div style="font-size:10pt; font-weight:bold; margin-top:8px; margin-bottom:6px;"><b>Mail Exchange (MX) Records:</b></div>'
                 )
                 parts.append(
-                    '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0;">'
+                    '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0; box-shadow: 0 2px 8px rgba(0,0,0,0.15); border-radius: 4px;">'
                 )
                 parts.append(
                     '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; table-layout:fixed; width:100%;">'
@@ -3788,7 +3938,6 @@ class HelloWindow(QWidget):
                                 if kk and kk.lower() in kvals and vv not in (None, ""):
                                     return vv
             except Exception:
-
                 pass
 
             # Plain text header scan: look for "Key: Value" lines
@@ -3889,7 +4038,7 @@ class HelloWindow(QWidget):
                 f'<div style="font-weight:bold; font-size:10pt; margin-top:6px;">Directories/Files Found ({len(result.entries_found)}):</div>'
             )
             parts.append(
-                '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0;">'
+                '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0; box-shadow: 0 2px 8px rgba(0,0,0,0.15); border-radius: 4px;">'
             )
             parts.append(
                 '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; table-layout:fixed; width:100%;">'
@@ -3927,7 +4076,7 @@ class HelloWindow(QWidget):
                 if dur_ms is not None:
                     try:
                         d = int(dur_ms)
-                        dur_fmt = f"{d/1000:.2f}s" if d >= 1000 else f"{d}ms"
+                        dur_fmt = f"{d / 1000:.2f}s" if d >= 1000 else f"{d}ms"
                     except Exception:
                         dur_fmt = str(dur_ms)
                 # prefer showing words if available, otherwise lines (kept small column)
@@ -3992,16 +4141,13 @@ class HelloWindow(QWidget):
 
             parts = []
             parts.append(
-                '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0;">'
+                '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0; box-shadow: 0 2px 8px rgba(0,0,0,0.15); border-radius: 4px;">'
             )
             parts.append(
                 '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; table-layout:fixed; width:100%;">'
             )
             parts.append(
-                "<colgroup>"
-                '<col style="width:70%;">'
-                '<col style="width:30%;">'
-                "</colgroup>"
+                '<colgroup><col style="width:70%;"><col style="width:30%;"></colgroup>'
             )
             parts.append(
                 "<thead>"
@@ -4038,7 +4184,7 @@ class HelloWindow(QWidget):
 
             parts = []
             parts.append(
-                '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0;">'
+                '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0; box-shadow: 0 2px 8px rgba(0,0,0,0.15); border-radius: 4px;">'
             )
             parts.append(
                 '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; table-layout:fixed; width:100%;">'
@@ -4081,7 +4227,7 @@ class HelloWindow(QWidget):
 
             parts = []
             parts.append(
-                '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0;">'
+                '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0; box-shadow: 0 2px 8px rgba(0,0,0,0.15); border-radius: 4px;">'
             )
             parts.append(
                 '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; table-layout:fixed; width:100%;">'
@@ -4121,7 +4267,7 @@ class HelloWindow(QWidget):
 
             parts = []
             parts.append(
-                '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0;">'
+                '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0; box-shadow: 0 2px 8px rgba(0,0,0,0.15); border-radius: 4px;">'
             )
             parts.append(
                 '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; table-layout:fixed; width:100%;">'
@@ -4414,8 +4560,16 @@ class HelloWindow(QWidget):
             )
 
             for net in result.network_info:
-                netblock_type = net.nettype if net.netblock else "Network"
-                organization = net.organization if net.organization else "N/A"
+                netblock_type = (
+                    net.nettype
+                    if (hasattr(net, "netblock") and net.netblock)
+                    else "Network"
+                )
+                organization = (
+                    net.organization
+                    if (hasattr(net, "organization") and net.organization)
+                    else "N/A"
+                )
                 parts.append(
                     "<tr>"
                     f'<td style="padding:6px; border:1px solid #ddd; word-break:break-word; width:40%; font-size:10pt;"><b>{net.ip_range}</b></td>'
@@ -4718,122 +4872,125 @@ class HelloWindow(QWidget):
                     )
 
         elif result.query_type == "ip" and result.network_info:
-            network = result.network_info
-
-            # Display network information
-            self.results_textbox.append(
-                f'<span style="font-size:10pt;"><b>Network Information:</b></span>'
-            )
-
-            parts = []
-            parts.append(
-                '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0;">'
-            )
-            parts.append(
-                '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; table-layout:fixed; width:100%;">'
-            )
-            parts.append(
-                "<colgroup>"
-                '<col style="width:25%;">'
-                '<col style="width:75%;">'
-                "</colgroup>"
-            )
-            parts.append(
-                "<thead>"
-                '<tr style="background:#f0f0f0;">'
-                '<th style="text-align:left; padding:6px; border:1px solid #ddd; white-space:nowrap; font-size:10pt;">Field</th>'
-                '<th style="text-align:left; padding:6px; border:1px solid #ddd; white-space:nowrap; font-size:10pt;">Value</th>'
-                "</tr>"
-                "</thead>"
-                "<tbody>"
-            )
-
-            # Add network information rows
-            if network.net_range:
-                parts.append(
-                    f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>IP Range</b></td>'
-                    f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.net_range}</td></tr>'
-                )
-            if network.cidr:
-                parts.append(
-                    f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>CIDR</b></td>'
-                    f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.cidr}</td></tr>'
-                )
-            if network.net_name:
-                parts.append(
-                    f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>Network Name</b></td>'
-                    f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.net_name}</td></tr>'
-                )
-            if network.organization:
-                parts.append(
-                    f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>Organization</b></td>'
-                    f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.organization}</td></tr>'
-                )
-            if network.net_type:
-                parts.append(
-                    f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>Type</b></td>'
-                    f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.net_type}</td></tr>'
-                )
-            if network.origin_as:
-                parts.append(
-                    f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>Origin AS</b></td>'
-                    f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.origin_as}</td></tr>'
-                )
-            if network.reg_date:
-                parts.append(
-                    f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>Registered</b></td>'
-                    f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.reg_date}</td></tr>'
-                )
-            if network.updated:
-                parts.append(
-                    f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>Updated</b></td>'
-                    f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.updated}</td></tr>'
-                )
-
-            parts.append("</tbody></table>")
-            parts.append("</div>")
-            self.results_textbox.append("".join(parts))
-
-            # Display organization address if available
-            if network.address or network.city or network.state or network.country:
+            # Iterate through all networks in the list
+            for network in result.network_info:
+                # Display network information
                 self.results_textbox.append(
-                    f'<span style="font-size:10pt;"><b>Organization Address:</b></span>'
-                )
-                address_parts = []
-                if network.address:
-                    address_parts.append(network.address)
-                if network.city:
-                    address_parts.append(network.city)
-                if network.state:
-                    address_parts.append(network.state)
-                if network.postal_code:
-                    address_parts.append(network.postal_code)
-                if network.country:
-                    address_parts.append(network.country)
-
-                full_address = ", ".join(address_parts)
-                self.results_textbox.append(
-                    f'<div style="margin-left:12px; font-size:10pt;">{full_address}</div>'
+                    f'<span style="font-size:10pt;"><b>Network Information:</b></span>'
                 )
 
-            # Display contact information
-            if network.abuse_contacts:
-                self.results_textbox.append(
-                    f'<span style="font-size:10pt;"><b>Abuse Contacts:</b></span>'
+                parts = []
+                parts.append(
+                    '<div style="display:block; width:100%; overflow:auto; box-sizing:border-box; padding:0; margin:0;">'
                 )
+                parts.append(
+                    '<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse; table-layout:fixed; width:100%;">'
+                )
+                parts.append(
+                    "<colgroup>"
+                    '<col style="width:25%;">'
+                    '<col style="width:75%;">'
+                    "</colgroup>"
+                )
+                parts.append(
+                    "<thead>"
+                    '<tr style="background:#f0f0f0;">'
+                    '<th style="text-align:left; padding:6px; border:1px solid #ddd; white-space:nowrap; font-size:10pt;">Field</th>'
+                    '<th style="text-align:left; padding:6px; border:1px solid #ddd; white-space:nowrap; font-size:10pt;">Value</th>'
+                    "</tr>"
+                    "</thead>"
+                    "<tbody>"
+                )
+                if hasattr(network, "net_range") and network.net_range:
+                    parts.append(
+                        f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>IP Range</b></td>'
+                        f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.net_range}</td></tr>'
+                    )
+                if hasattr(network, "cidr") and network.cidr:
+                    parts.append(
+                        f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>CIDR</b></td>'
+                        f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.cidr}</td></tr>'
+                    )
+                if hasattr(network, "net_name") and network.net_name:
+                    parts.append(
+                        f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>Network Name</b></td>'
+                        f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.net_name}</td></tr>'
+                    )
+                if hasattr(network, "organization") and network.organization:
+                    parts.append(
+                        f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>Organization</b></td>'
+                        f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.organization}</td></tr>'
+                    )
+                if hasattr(network, "net_type") and network.net_type:
+                    parts.append(
+                        f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>Type</b></td>'
+                        f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.net_type}</td></tr>'
+                    )
+                if hasattr(network, "origin_as") and network.origin_as:
+                    parts.append(
+                        f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>Origin AS</b></td>'
+                        f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.origin_as}</td></tr>'
+                    )
+                if hasattr(network, "reg_date") and network.reg_date:
+                    parts.append(
+                        f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>Registered</b></td>'
+                        f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.reg_date}</td></tr>'
+                    )
+                if hasattr(network, "updated") and network.updated:
+                    parts.append(
+                        f'<tr><td style="padding:6px; border:1px solid #ddd; font-size:10pt;"><b>Updated</b></td>'
+                        f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt;">{network.updated}</td></tr>'
+                    )
+                    parts.append("</tbody></table>")
+                    parts.append("</div>")
+                    self.results_textbox.append("".join(parts))
+
+                # Display organization address if available
+                if (
+                    (hasattr(network, "address") and network.address)
+                    or (hasattr(network, "city") and network.city)
+                    or (hasattr(network, "state") and network.state)
+                    or (hasattr(network, "country") and network.country)
+                ):
+                    self.results_textbox.append(
+                        f'<span style="font-size:10pt;"><b>Organization Address:</b></span>'
+                    )
+                    address_parts = []
+                    if hasattr(network, "address") and network.address:
+                        address_parts.append(network.address)
+                    if hasattr(network, "city") and network.city:
+                        address_parts.append(network.city)
+                    if hasattr(network, "state") and network.state:
+                        address_parts.append(network.state)
+                    if hasattr(network, "postal_code") and network.postal_code:
+                        address_parts.append(network.postal_code)
+                    if hasattr(network, "country") and network.country:
+                        address_parts.append(network.country)
+
+                    full_address = ", ".join(address_parts)
+                    self.results_textbox.append(
+                        f'<div style="margin-left:12px; font-size:10pt;">{full_address}</div>'
+                    )
+
+                # Display contact information
+                if hasattr(network, "abuse_contacts") and network.abuse_contacts:
+                    self.results_textbox.append(
+                        f'<span style="font-size:10pt;"><b>Abuse Contacts:</b></span>'
+                    )
+
                 for contact in network.abuse_contacts:
                     self.results_textbox.append(
                         f'<div style="margin-left:12px; font-size:10pt;">• {contact}</div>'
                     )
 
-        if network.tech_contacts:
-            self.results_textbox.append(
-                f'<span style="font-size:10pt;"><b>Technical Contacts:</b></span>'
-            )
-            for contact in network.tech_contacts:
-                self.results_textbox.append(
-                    f'<div style="margin-left:12px; font-size:10pt;">• {contact}</div>'
-                )
+                if hasattr(network, "tech_contacts") and network.tech_contacts:
+                    self.results_textbox.append(
+                        f'<span style="font-size:10pt;"><b>Technical Contacts:</b></span>'
+                    )
+                    for contact in network.tech_contacts:
+                        self.results_textbox.append(
+                            f'<div style="margin-left:12px; font-size:10pt;">• {contact}</div>'
+                        )
         else:
             # Fallback display if parsing failed
             print(f"DEBUG: No proper domain_info or network_info, showing raw output")
@@ -5095,6 +5252,10 @@ class HelloWindow(QWidget):
         try:
             import json
 
+            # Keep original text for content-marking
+            orig_text = text if text is not None else tool_name
+            key_for_mark = None
+
             # If called with a single argument, treat it as the text and use current tab
             if text is None:
                 text = tool_name or ""
@@ -5105,6 +5266,14 @@ class HelloWindow(QWidget):
                 target_view = (
                     self.terminal_views.get(key) or self.terminal_tabs.currentWidget()
                 )
+                key_for_mark = key if key in self.terminal_views else None
+
+            # Mark content visibility (ignore pure ANSI/whitespace)
+            try:
+                if key_for_mark:
+                    self._mark_terminal_has_content(key_for_mark, orig_text or "")
+            except Exception:
+                pass
 
             if not target_view:
                 return

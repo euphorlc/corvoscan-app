@@ -170,6 +170,18 @@ def show_question_popup(parent, message, title="Confirm"):
     return dlg.exec() == QDialog.DialogCode.Accepted
 
 
+def show_confirm_new_scan(parent):
+    """Prompt the user to confirm starting a new scan.
+    Warns that previous terminal output and results will be cleared.
+    Returns True if confirmed, False otherwise.
+    """
+    message = (
+        "Are you sure you want to start a new scan?\n\n"
+        "This will clear all previous terminal output and results."
+    )
+    return show_question_popup(parent, message, title="Start New Scan")
+
+
 def show_terminal_clear_choice(parent):
     """Show a dialog with three choices:
     - Clear All
