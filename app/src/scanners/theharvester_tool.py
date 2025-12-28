@@ -1,4 +1,5 @@
 import os
+import shutil
 from .tool_process_base import ToolProcessBase
 
 value_required = [
@@ -133,20 +134,27 @@ class TheHarvesterToolProcess(ToolProcessBase):
         super().__init__("theharvester", target, params)
 
     def build_command(self):
-        # Get the absolute path to theHarvester
+        # Require the native theHarvester executable (Kali image provides it).
         current_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(os.path.dirname(current_dir))
-        theharvester_path = os.path.join(
-            project_root, "tools", "theHarvester", "theHarvester.py"
-        )
 
-        # Use the virtual environment's Python interpreter
-        venv_python = os.path.join(project_root, "venv", "bin", "python")
-        if not os.path.exists(venv_python):
-            venv_python = "python3"  # Fallback to system python
+        # Check PATH for common executable names (prefer system-installed binary)
+        native_exec = shutil.which("theHarvester") or shutil.which("theharvester")
+
+        # Also allow a packaged native binary under tools/theHarvester/theHarvester
+        if not native_exec:
+            packaged_bin = os.path.join(project_root, "tools", "theHarvester", "theHarvester")
+            if os.path.exists(packaged_bin) and os.access(packaged_bin, os.X_OK):
+                native_exec = packaged_bin
+
+        # Do NOT fall back to invoking the Python module — require native binary.
+        if not native_exec:
+            raise FileNotFoundError(
+                "theHarvester binary not found in PATH or packaged location. Ensure the native theHarvester executable is installed in the image."
+            )
 
         # Ensure -b <source> is placed before -d <domain>
-        cmd = [venv_python, theharvester_path]
+        cmd = [native_exec]
 
         # Look for the source tuple (expected from the UI as a required field)
         source_val = None
