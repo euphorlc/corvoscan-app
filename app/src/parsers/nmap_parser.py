@@ -219,42 +219,30 @@ class NmapResultsParser(ToolResultsParser):
         """Extract scan type(s) performed in the Nmap output and return a comma-separated string."""
         output = self.get_raw_output() or ""
 
-        # Map common nmap flags / output indicators to the UI labels used in main.py.
-        # We check both flag tokens and textual indicators present in output for robustness.
-        ordered_map = [
-            (["-F", "Fast scan"], "Fast scan (-F)"),
-            (["-sV", "Service scan", "Service detection"], "Service detection (-sV)"),
-            (["-O", "OS detection"], "OS detection (-O)"),
-            (["-sU", "UDP Scan"], "UDP scan (-sU)"),
-            (["-sS", "SYN Stealth Scan"], "SYN (Stealth) scan (-sS)"),
-            (["-sn", "Ping Scan"], "Ping scan (-sn)"),
-            (["-sC", "Script scan"], "Script scan (-sC)"),
-            (["--traceroute", "traceroute"], "Traceroute (--traceroute)"),
-            (["-p", "ports scanned", "Not shown:"], "Custom port range (-p)"),
-        ]
+        # Mapping of indicators to scan type names
+        scan_map = {
+            ("SYN Stealth Scan", "-sS"): "SYN Stealth Scan",
+            ("UDP Scan", "-sU"): "UDP Scan",
+            ("Connect() scan", "-sT"): "TCP Connect Scan",
+            ("Ping Scan", "-sn"): "Ping Scan",
+            ("Service scan", "-sV"): "Service Version Scan",
+            ("OS detection", "-O"): "OS Detection Scan",
+            ("Script scan", "-sC"): "Script Scan",
+            ("-A",): "Aggressive Scan",
+        }
 
-        detected = []
-        out_lower = output.lower()
-        for indicators, label in ordered_map:
-            found = False
-            for ind in indicators:
-                if ind.lower() in out_lower:
-                    found = True
-                    break
-            if found:
-                detected.append(label)
+        detected_scans = []
+        for indicators, scan_name in scan_map.items():
+            if any(indicator in output for indicator in indicators):
+                detected_scans.append(scan_name)
 
-        if not detected:
+        # If no scan types matched, return a default
+        if not detected_scans:
             return "Standard Scan"
 
-        # Preserve defined order and remove duplicates if any
-        seen = set()
-        ordered = []
-        for d in detected:
-            if d not in seen:
-                ordered.append(d)
-                seen.add(d)
-        return ", ".join(ordered)
+        # Return as a single, stable comma-separated string
+        # (NmapResult.scan_type is declared as str)
+        return ", ".join(sorted(dict.fromkeys(detected_scans)))
 
     def _parse_hosts_and_ports(self, hosts: List[HostInfo], ports: List[PortInfo]):
         """Parse host and port information"""
@@ -935,7 +923,7 @@ class NmapResultsParser(ToolResultsParser):
                 # friendly summary for UI
                 proto_part = f" {proto}" if proto else ""
                 scan_stats["not_shown_display"] = (
-                    f"{scan_stats.get('not_shown_count', '?')}{proto_part} ports ({scan_stats.get('not_shown_reason','').strip()})"
+                    f"{scan_stats.get('not_shown_count', '?')}{proto_part} ports ({scan_stats.get('not_shown_reason', '').strip()})"
                 )
                 continue
 
@@ -1352,13 +1340,17 @@ class NmapResultsParser(ToolResultsParser):
             else []
         )
 
-        def add(sev, msg, ctx=None):
+        def add(sev, msg, ctx=None, insight=None, remediation=None):
             entry = {
                 "severity": sev or defaults.get("severity", "Info"),
                 "message": msg,
             }
             if ctx:
                 entry["context"] = ctx
+            if insight:
+                entry["insight"] = insight
+            if remediation:
+                entry["remediation"] = remediation
             if entry not in diags:
                 diags.append(entry)
 
@@ -1436,6 +1428,8 @@ class NmapResultsParser(ToolResultsParser):
                         r.get("severity"),
                         r.get("message", "Matched rule"),
                         f"port {p.port}/{p.protocol} service={p.service}",
+                        insight=r.get("insight"),
+                        remediation=r.get("remediation"),
                     )
                     matched = True
 
@@ -1576,7 +1570,13 @@ class NmapResultsParser(ToolResultsParser):
                         vr.get("message")
                         or f"{p.service or 'service'} version {actual_ver} is older than required {vr_min}"
                     )
-                    add(sev, msg, f"port {p.port}/{p.protocol} (detected {actual_ver})")
+                    add(
+                        sev,
+                        msg,
+                        f"port {p.port}/{p.protocol} (detected {actual_ver})",
+                        insight=vr.get("insight"),
+                        remediation=vr.get("remediation"),
+                    )
                 elif vr_pattern and re.search(vr_pattern, combined, re.IGNORECASE):
                     # if only pattern matched, report it
                     sev = vr.get("severity") or "High"
@@ -1588,6 +1588,8 @@ class NmapResultsParser(ToolResultsParser):
                         sev,
                         msg,
                         f"port {p.port}/{p.protocol} (detected {actual_ver or 'unknown'})",
+                        insight=vr.get("insight"),
+                        remediation=vr.get("remediation"),
                     )
 
         # SSL observations
@@ -1613,6 +1615,8 @@ class NmapResultsParser(ToolResultsParser):
                         r.get("severity"),
                         r.get("message", "OS rule matched"),
                         f"os: {o.name}",
+                        insight=r.get("insight"),
+                        remediation=r.get("remediation"),
                     )
 
         # scan_stats hints

@@ -681,67 +681,6 @@ class FFUFParser(ToolResultsParser):
         # augment progress_info
         progress_info.setdefault("total_requests", total_requests)
         progress_info.setdefault("errors_count", errors_count)
-        # Robust post-scan pass: extract final progress/summary values from the raw output
-        try:
-            cleaned = _ansi_re.sub("", raw_output or "")
-            # last seen Progress: [processed/total]
-            m = None
-            for mm in re.finditer(r"Progress:\s*\[\s*(\d+)\s*/\s*(\d+)\s*\]", cleaned):
-                m = mm
-            if m:
-                try:
-                    progress_processed = int(m.group(1))
-                    progress_total = int(m.group(2))
-                    total_requests = progress_total or total_requests
-                except Exception:
-                    pass
-
-            # last seen req/sec
-            m = None
-            for mm in re.finditer(r"([\d,]+(?:\.\d+)?)\s*req/sec", cleaned):
-                m = mm
-            if m:
-                try:
-                    requests_per_sec = float(m.group(1).replace(",", ""))
-                except Exception:
-                    pass
-
-            # last seen Duration: [..]
-            m = None
-            for mm in re.finditer(r"Duration:\s*\[([^\]]+)\]", cleaned):
-                m = mm
-            if m:
-                progress_duration = m.group(1).strip()
-
-            # last seen Errors: N
-            m = None
-            for mm in re.finditer(r"Errors:\s*(\d+)", cleaned):
-                m = mm
-            if m:
-                try:
-                    errors_count = int(m.group(1))
-                except Exception:
-                    pass
-
-            # fallback: explicit '<N> requests' anywhere
-            m = re.search(r"\b(\d{2,})\s+requests\b", cleaned, re.IGNORECASE)
-            if m:
-                try:
-                    total_requests = int(m.group(1))
-                except Exception:
-                    pass
-
-            # update progress_info with discovered values (do not overwrite existing metadata block)
-            progress_info.setdefault("total_requests", total_requests)
-            progress_info.setdefault("processed", progress_processed)
-            progress_info.setdefault("total", progress_total)
-            progress_info.setdefault("requests_per_sec", requests_per_sec)
-            progress_info.setdefault("duration", progress_duration)
-            progress_info.setdefault("errors_count", errors_count)
-        except Exception:
-            # best-effort: ignore failures in the post-scan pass
-            pass
-
         # ensure wordlist present at top-level if we found it
         if progress_info.get("metadata", {}).get("wordlist_raw"):
             progress_info.setdefault(
@@ -749,59 +688,6 @@ class FFUFParser(ToolResultsParser):
             )
         elif metadata.get("wordlist_raw"):
             progress_info.setdefault("wordlist", metadata.get("wordlist_raw"))
-
-        # Canonicalize progress_info keys so there is only one canonical representation
-        try:
-            # preferred keys (match FFUFResult naming)
-            prog_processed = progress_info.pop(
-                "processed", progress_info.pop("progress_processed", progress_processed)
-            )
-            prog_total = progress_info.pop(
-                "total", progress_info.pop("progress_total", progress_total)
-            )
-            prog_rps = progress_info.pop(
-                "requests_per_sec", progress_info.pop("rps", requests_per_sec)
-            )
-            prog_dur = progress_info.pop(
-                "duration", progress_info.pop("progress_duration", progress_duration)
-            )
-            prog_errors = progress_info.pop("errors_count", errors_count)
-            prog_total_requests = progress_info.pop("total_requests", total_requests)
-
-            # remove any legacy aliases that might remain
-            for alias in ("processed", "total", "duration", "rps"):
-                if alias in progress_info:
-                    try:
-                        del progress_info[alias]
-                    except Exception:
-                        pass
-
-            # set canonical keys
-            progress_info["progress_processed"] = (
-                int(prog_processed) if prog_processed is not None else 0
-            )
-            progress_info["progress_total"] = (
-                int(prog_total) if prog_total is not None else 0
-            )
-            # requests per sec can be float
-            try:
-                progress_info["requests_per_sec"] = (
-                    float(prog_rps) if prog_rps is not None else 0.0
-                )
-            except Exception:
-                progress_info["requests_per_sec"] = 0.0
-            progress_info["progress_duration"] = (
-                str(prog_dur) if prog_dur is not None else ""
-            )
-            progress_info["errors_count"] = (
-                int(prog_errors) if prog_errors is not None else 0
-            )
-            progress_info["total_requests"] = (
-                int(prog_total_requests) if prog_total_requests is not None else 0
-            )
-        except Exception:
-            # don't fail parsing on canonicalization issues
-            pass
 
         # Finalize metadata as the LAST block in progress_info:
         # Build a canonicalized metadata block and place it at the end by popping any
@@ -974,13 +860,22 @@ class FFUFParser(ToolResultsParser):
                 ruleset = {}
         defaults = ruleset.get("defaults", {}) if isinstance(ruleset, dict) else {}
 
-        def add(sev, msg, ctx=None):
+        def add(sev, msg, ctx=None, insight=None, remediation=None):
             entry = {
                 "severity": sev or defaults.get("severity", "Info"),
                 "message": msg,
             }
             if ctx:
                 entry["context"] = ctx
+            # support rule-specific insight/remediation with fallback to defaults
+            ins = insight if insight is not None else defaults.get("insight")
+            rem = (
+                remediation if remediation is not None else defaults.get("remediation")
+            )
+            if ins:
+                entry["insight"] = ins
+            if rem:
+                entry["remediation"] = rem
             if entry not in diags:
                 diags.append(entry)
 
@@ -1041,21 +936,16 @@ class FFUFParser(ToolResultsParser):
                                 rule.get("message") or f"Path rule matched: {rule_path}"
                             )
                             ctx = f"{hay} (status:{status})"
-                            add(sev, msg, ctx)
+                            add(
+                                sev,
+                                msg,
+                                ctx,
+                                insight=rule.get("insight"),
+                                remediation=rule.get("remediation"),
+                            )
                     except Exception:
                         continue
             except Exception:
                 continue
 
         return diags
-
-    def _maybe_int(v):
-        try:
-            if v is None or v == "":
-                return None
-            return int(v)
-        except Exception:
-            try:
-                return int(str(v).strip())
-            except Exception:
-                return None
