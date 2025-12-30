@@ -5316,7 +5316,6 @@ class HelloWindow(QWidget):
             )
 
     def update_diagnostics(self, result):
-        """Update diagnostics with result information (rich HTML formatting)."""
         try:
             import html as _html
 
@@ -5330,70 +5329,93 @@ class HelloWindow(QWidget):
                     f'<div style="font-size:10pt; margin-bottom:6px; color:#d32f2f;">Error: {_html.escape(str(result.error_message))}</div>'
                 )
 
-            # Diagnostics list (severity bold + color, message, optional context)
+            # Diagnostics list
             diags = getattr(result, "diagnostics", None) or []
 
             if not diags:
-                # show a default "no diagnostics" info entry using same formatting
-                sev = "Info"
-                color = "#90CAF9"  # light blue
-                sev_html = f'<span style="font-weight:bold; color:{color}; margin-right:6px;">[{_html.escape(sev.upper())}]</span>'
-                msg_html = f'<span style="font-size:10pt; color:#222;">No diagnostics found</span>'
                 parts.append(
-                    f'<div style="font-size:10pt; margin-bottom:8px;">{sev_html}{msg_html}</div>'
+                    '<div style="font-size:10pt; margin-bottom:12px; color:#666;">No diagnostics found</div>'
                 )
             else:
+                # Table with fixed column widths
+                parts.append('<div style="width:100%;">')
+                # Note: Removed table-layout:fixed as it's often ignored by Qt
+                parts.append(
+                    '<table style="border-collapse:collapse; width:100%; border:1px solid #ddd;">'
+                )
+
+                # Define widths directly in the <th> tags for better compatibility
+                parts.append(
+                    "<thead>"
+                    '<tr style="background:#f0f0f0;">'
+                    '<th style="width:10%; text-align:left; padding:6px; border:1px solid #ddd; font-size:10pt;">Severity</th>'
+                    '<th style="width:15%; text-align:left; padding:6px; border:1px solid #ddd; font-size:10pt;">Finding</th>'
+                    '<th style="width:20%; text-align:left; padding:6px; border:1px solid #ddd; font-size:10pt;">Description</th>'
+                    '<th style="width:55%; text-align:left; padding:6px; border:1px solid #ddd; font-size:10pt;">Insight</th>'
+                    "</tr>"
+                    "</thead>"
+                    "<tbody>"
+                )
+
                 for d in diags:
                     sev_raw = str(d.get("severity", "Info") or "Info")
                     sev = sev_raw.strip()
                     msg = str(d.get("message", "") or "")
-                    ctx = d.get("context") or d.get("context", "") or ""
+                    ctx = str(d.get("context", "") or "")
+                    insight = str(d.get("insight", "") or "N/A")
 
-                    # normalize severity -> color
+                    # Severity colors
                     s = sev.lower()
                     if s == "info":
-                        color = "#90CAF9"  # light blue
+                        color = "#90CAF9"
+                        bg_color = "#E3F2FD"
                     elif s == "low":
-                        color = "#FBC02D"  # yellow/amber
+                        color = "#FBC02D"
+                        bg_color = "#FFFDE7"
                     elif s == "medium":
-                        color = "#FF9800"  # orange
+                        color = "#FF9800"
+                        bg_color = "#FFF3E0"
                     elif s == "high":
-                        color = "#E53935"  # red
+                        color = "#E53935"
+                        bg_color = "#FFEBEE"
+                    elif s == "critical":
+                        color = "#C62828"
+                        bg_color = "#B71C1C"
                     else:
-                        color = "#90CAF9"  # default to info blue
+                        color = "#90CAF9"
+                        bg_color = "#E3F2FD"
 
-                    sev_html = f'<span style="font-weight:bold; color:{color}; margin-right:6px;">[{_html.escape(sev.upper())}]</span>'
-                    msg_html = f'<span style="font-size:10pt; color:#222;">{_html.escape(msg)}</span>'
-                    ctx_html = (
-                        f' <span style="font-size:10pt; color:#666;">({_html.escape(str(ctx))})</span>'
-                        if ctx
-                        else ""
-                    )
+                    description = msg
+                    if ctx:
+                        description += f" ({ctx})"
+
                     parts.append(
-                        f'<div style="font-size:10pt; margin-bottom:8px;">{sev_html}{msg_html}{ctx_html}</div>'
+                        "<tr>"
+                        f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt; background-color:{bg_color}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"><b style="color:{color};">{_html.escape(sev.upper())}</b></td>'
+                        f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt; white-space:normal; word-break:break-word;">{_html.escape(msg)}</td>'
+                        f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt; white-space:normal; word-break:break-word;">{_html.escape(description)}</td>'
+                        f'<td style="padding:6px; border:1px solid #ddd; font-size:10pt; white-space:normal; word-break:break-word;">{_html.escape(insight)}</td>'
+                        "</tr>"
                     )
 
-            # Separator with spacing
+                parts.append("</tbody></table></div>")
+
+            # Separator
             parts.append(
-                '<div style="font-size:10pt; color:#888; margin-top:6px; margin-bottom:12px;">'
-                + ("—" * 30)
+                '<div style="font-size:10pt; color:#888; margin-top:12px; margin-bottom:12px;">'
+                + ("—" * 40)
                 + "</div>"
             )
 
-            # Insert as HTML block (preserves styling and spacing)
             html_block = "".join(parts)
             try:
-                # insertHtml appends without converting newlines; use it for reliable HTML rendering
                 self.diagnostics_textbox.insertHtml(html_block)
-                # move to new paragraph so future inserts are clean
                 self.diagnostics_textbox.insertPlainText("\n")
             except Exception:
-                # fallback: plain append with minimal formatting
-                for line in _html.escape("\n".join(parts)).splitlines():
-                    self.diagnostics_textbox.append(line)
-        except Exception:
-            # don't let diagnostics errors crash the UI
-            pass
+                self.diagnostics_textbox.append(html_block)
+
+        except Exception as e:
+            print(f"Failed to update diagnostics: {e}")
 
     def handle_export_results(self):
         """Export parsed results to file"""
