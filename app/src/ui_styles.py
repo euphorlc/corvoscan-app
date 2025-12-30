@@ -89,8 +89,9 @@ ACTIVE_BTN_STYLE = """
 TOOLTIP_APP_STYLE = """
 /* Tooltip styling (slightly dark so text is readable) */
 QToolTip {
-    background-color: #2b2b2b;
-    color: #ffffff;
+    background-color: #ffffff;
+    color: #2b2b2b;
+    font-weight: normal;
     border: 1px solid #444;
     padding: 8px;
     border-radius: 8px;

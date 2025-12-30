@@ -4,6 +4,7 @@ import os
 import re
 import json
 import time
+import html
 from PyQt6.QtCore import pyqtSignal
 from unittest import result
 from PyQt6.QtCore import pyqtSignal, QRegularExpression
@@ -98,6 +99,182 @@ from src.ui_styles import (
 ANSI_RESET = "\x1b[0m"
 
 # --- Helper Functions: UI Styling ---
+
+# Beginner-friendly short descriptions for each tool parameter (used as tooltips).
+PARAM_SHORT_DESCRIPTIONS = {
+    "Whois": {
+        "Default scan": "Run a normal whois lookup for the target domain.",
+        "WHOIS server (-h)": "Specify a particular WHOIS server to query (e.g., whois.iana.org).",
+        "Port (-p)": "Specify the TCP port for WHOIS (default is 43).",
+        "Display referral chain (-I)": "Show intermediate WHOIS responses that point to other servers.",
+        "Verbose output (--verbose)": "Show extra information and details about the lookup process.",
+        "Suppress legal disclaimers (-H)": "Hide the lengthy legal text some WHOIS servers return.",
+    },
+    "NSLookup": {
+        "IPv4 addresses (A)": "Request A records (IPv4 addresses) for the domain.",
+        "IPv6 addresses (AAAA)": "Request AAAA records (IPv6 addresses) for the domain.",
+        "Mail servers (MX)": "Find mail exchanger servers used to receive email for the domain.",
+        "Nameservers (NS)": "List authoritative name servers for the domain.",
+        "Start of Authority (SOA)": "Show SOA record which contains administrative info about the zone.",
+        "TXT records (TXT)": "Retrieve TXT records (often used for SPF, DKIM, DMARC).",
+        "Canonical names (CNAME)": "Show CNAME records that point one name to another.",
+    },
+    "theHarvester": {
+        "[REQUIRED] Source (-b, --source)": "Choose which public source to search (e.g., bing, crtsh).",
+        "Limit (-l, --limit)": "Maximum results to fetch from the selected source (small integer).",
+        "Start result (-S, --start)": "Offset to start returning results from (useful for paging).",
+        "DNS server (-e, --dns-server)": "Optional DNS server IP to use for DNS lookups.",
+        "DNS resolve (-r, --dns-resolve)": "Resolve discovered hostnames to IP addresses.",
+        "DNS lookup (-n, --dns-lookup)": "Perform additional DNS lookups while gathering results.",
+        "Quiet mode (-q, --quiet)": "Reduce on-screen output to show only essential results.",
+        "API scan (-a, --api-scan)": "Use API-enabled sources when available for more complete results.",
+    },
+    "DNSEnum": {
+        "Basic run": "Run the standard DNS enumeration workflow.",
+        "Verbose output (-v)": "Show extra details about each DNS query performed.",
+        "Skip PTR (--noreverse)": "Do not perform reverse DNS (PTR) lookups for IPs.",
+        "Enable brute force": "Try many common subdomain names from a wordlist.",
+        "DNS server (--dnsserver <IP>)": "Use this DNS server IP instead of system default.",
+    },
+    "NMAP": {
+        "Fast scan (-F)": "Scan fewer ports for a quicker, lighter scan.",
+        "Service detection (-sV)": "Probe open ports to identify running services and versions.",
+        "OS detection (-O)": "Try to guess the operating system of the host.",
+        "UDP scan (-sU)": "Scan UDP ports (takes longer and less reliable than TCP).",
+        "SYN (Stealth) scan (-sS)": "A common fast TCP scan that is stealthier than a full connect.",
+        "Ping scan (-sn)": "Only check which hosts are up without scanning ports.",
+        "Script scan (-sC)": "Run default Nmap scripts for common additional checks.",
+        "Traceroute (--traceroute)": "Map the network path to the target host.",
+        "Custom port range (-p)": "Specify one or more ports or ranges (e.g., 80,443 or 1-1000).",
+    },
+    "WhatWeb": {
+        "Default scan": "Run a standard website fingerprint to detect common tech.",
+        "Verbose (-v)": "Show more detailed detection information.",
+        "Follow redirects (--follow-redirect)": "Allow the scanner to follow HTTP redirects.",
+        "Max redirects (--max-redirects)": "Limit how many redirects will be followed.",
+        "User-Agent (--user-agent)": "Set a custom browser identifier string for requests.",
+        "Header (--header)": "Add a custom HTTP header to the request.",
+        "Wait (--wait)": "Pause a short time between requests to be polite to servers.",
+        "Max threads (--max-threads)": "Limit concurrent requests to avoid overloading the target.",
+    },
+    "FFUF": {
+        "Protocol (http/https)": "Choose whether to fuzz using http or https.",
+        "Default scan": "Run a basic fuzzing pass with default options.",
+        "Recursion": "Recursively fuzz discovered directories for deeper results.",
+        "Status codes": "Specify which HTTP status codes to include in results.",
+        "Filter code": "Exclude results matching these HTTP codes from the output.",
+        "Extension fuzz": "Append common file extensions from the wordlist (e.g., .php, .html).",
+        "Depth limit": "Limit how deep recursive fuzzing will go.",
+        "Rate limit": "Throttle requests per second to avoid overloading the server.",
+        "Time filter": "Filter results by response time (find slow or fast responses).",
+        "Follow redirects": "Follow HTTP redirects when fuzzing URLs.",
+        "Ignore SSL": "Do not validate SSL/TLS certificates (useful for self-signed sites).",
+    },
+}
+
+# Longer, more detailed descriptions shown when hovering the parameter itself (checkbox).
+# Populate entries here to provide extended guidance; fallback to short descriptions when missing.
+PARAM_DETAILED_DESCRIPTIONS = {
+    "Whois": {
+        "Default scan": "Performs a standard WHOIS lookup for the target domain using the default server resolution. Useful for quick ownership and registrar information without specifying servers or ports.",
+        "WHOIS server (-h)": "Query a specific WHOIS server instead of relying on automatic delegation. Use this to reach regional registries or specialized registry servers when the default response is incomplete or redirected.",
+        "Port (-p)": "Specify a non-standard TCP port to connect to the WHOIS service (default is 43). Handy when a custom server listens on an alternate port or when testing alternate endpoints.",
+        "Display referral chain (-I)": "Show the chain of WHOIS referrals returned by servers (when one server directs you to another). This helps trace who ultimately holds authoritative records for a domain.",
+        "Verbose output (--verbose)": "Emit additional diagnostic details about the query and responses, including low-level server replies and any parsing decisions made by the tool. Useful for troubleshooting or auditing.",
+        "Suppress legal disclaimers (-H)": "Hide the long legal boilerplate that some WHOIS servers append to responses to make the output easier to read and focus on the technical data.",
+    },
+    "NSLookup": {
+        "IPv4 addresses (A)": "Request A records to retrieve IPv4 addresses for the given hostname. Use this to resolve which IPv4 endpoints a domain currently points to.",
+        "IPv6 addresses (AAAA)": "Request AAAA records to retrieve IPv6 addresses. Useful for diagnosing dual-stack or IPv6-only hosting configurations.",
+        "Mail servers (MX)": "Query MX records to discover the mail exchangers responsible for accepting email for the domain and their priority ordering.",
+        "Nameservers (NS)": "List the authoritative nameservers for the zone. Good for confirming proper delegation and identifying hosting/DNS providers.",
+        "Start of Authority (SOA)": "Show the SOA record which contains administrative metadata for the zone (serial, refresh, retry, expiry, and primary nameserver). Useful for replication/troubleshooting.",
+        "TXT records (TXT)": "Retrieve TXT records such as SPF, DKIM, or arbitrary metadata stored in DNS. Important when validating email/security settings or custom verification tokens.",
+        "Canonical names (CNAME)": "Show CNAME records that alias one name to another. Use this to trace indirect hostnames and CDN or routing configurations.",
+    },
+    "theHarvester": {
+        "[REQUIRED] Source (-b, --source)": "Choose the external source to search (examples: bing, crtsh, urlscan). Each source has different coverage and rate limits — pick one compatible with your needs.",
+        "Limit (-l, --limit)": "Maximum number of results to fetch from the selected source. Use a lower number for quick reconnaissance or to avoid hitting API limits.",
+        "Start result (-S, --start)": "Offset into the results set to begin returning results from. Useful for paging through large result sets across multiple runs.",
+        "DNS server (-e, --dns-server)": "Optional DNS server IP to use for lookups instead of the system resolver; helpful when testing resolution from a specific network or avoiding DNS-based blocks.",
+        "DNS resolve (-r, --dns-resolve)": "Attempt to resolve discovered hostnames to IP addresses using DNS to provide both names and addresses in results.",
+        "DNS lookup (-n, --dns-lookup)": "Perform additional DNS queries (e.g., A/AAAA/MX) while harvesting to enrich the dataset with DNS metadata.",
+        "Quiet mode (-q, --quiet)": "Reduce console output to essential results only; useful for scripting or when you want compact output without progress messages.",
+        "API scan (-a, --api-scan)": "Use API-backed sources when available for more complete or faster results, but note some APIs require keys or may have rate limits.",
+    },
+    "DNSEnum": {
+        "Basic run": "Run DNSEnum's default enumeration process which includes common host and subdomain queries using built-in wordlists and heuristics.",
+        "Verbose output (-v)": "Log each DNS query and response in detail to help debug why a name was or wasn't found; increases output noise but is useful for troubleshooting.",
+        "Skip PTR (--noreverse)": "Skip reverse DNS (PTR) lookups for discovered IP addresses to speed up enumeration when PTR data is not required.",
+        "Enable brute force": "Enable brute-force subdomain discovery using wordlists. This can find many common subdomains but may generate a high query volume and noise.",
+        "DNS server (--dnsserver <IP>)": "Force queries to a specific DNS server (IPv4/IPv6) instead of the system resolver — useful for testing authoritarian or internal DNS views.",
+    },
+    "NMAP": {
+        "Fast scan (-F)": "Scan a reduced set of the most common ports for a quicker surface-level view of open services; good for large target sets or rapid checks.",
+        "Service detection (-sV)": "Probe open ports with service/version detection to identify software and versions running on each port; enables more precise fingerprinting.",
+        "OS detection (-O)": "Attempt to determine the remote host's operating system using TCP/IP fingerprinting techniques; requires elevated privileges for some probes.",
+        "UDP scan (-sU)": "Scan UDP ports which often reveal additional services but can be slower and less reliable than TCP scans due to UDP's stateless nature.",
+        "SYN (Stealth) scan (-sS)": "Send TCP SYN packets and analyze responses to discover open ports without completing the TCP handshake — faster and stealthier on many networks.",
+        "Ping scan (-sn)": "Only discover which hosts are up (no port scanning) by sending ICMP/TCP/UDP probes; useful as a host discovery step before detailed scanning.",
+        "Script scan (-sC)": "Run Nmap's default NSE scripts to collect common additional information (e.g., version probes, banner grabs, simple vulnerability checks).",
+        "Traceroute (--traceroute)": "Perform traceroute to map the network path to the target, helping identify intermediate hops and network topology.",
+        "Custom port range (-p)": "Specify exact ports or ranges to scan (comma-separated and ranges allowed) when you need to focus scanning on particular services.",
+    },
+    "WhatWeb": {
+        "Default scan": "Perform a standard fingerprinting scan to detect web server software, frameworks, and common CMS signatures using built-in signatures.",
+        "Verbose (-v)": "Show additional detection details and raw signature matches to help you understand why a fingerprint was identified.",
+        "Follow redirects (--follow-redirect)": "Allow the scanner to follow HTTP redirects when attempting to fingerprint a URL; useful when targets redirect to canonical domains.",
+        "Max redirects (--max-redirects)": "Limit how many successive redirects will be followed to avoid infinite loops or excessive request chains.",
+        "User-Agent (--user-agent)": "Supply a custom User-Agent header string to emulate different browsers or clients; some servers return different content per UA.",
+        "Header (--header)": "Add arbitrary HTTP headers to each request (format: 'Name: Value') to access content behind header-based routing or tests.",
+        "Wait (--wait)": "Insert a short pause between requests to reduce load on the target and avoid triggering rate-limiting or WAF defenses.",
+        "Max threads (--max-threads)": "Control the number of concurrent worker threads for fingerprinting; higher counts are faster but increase load and detection risk.",
+    },
+    "FFUF": {
+        "Protocol (http/https)": "Choose the protocol used when constructing target URLs for fuzzing. Use https for secure sites; if the server only supports HTTP, select http.",
+        "Default scan": "Run a simple fuzzing pass using the provided wordlist and default matching rules to quickly find common files and directories.",
+        "Recursion": "Enable recursive fuzzing so discovered paths are queued for additional fuzzing deeper in the directory tree; can greatly expand the search space.",
+        "Status codes": "Specify which HTTP status codes to include in the displayed results (e.g., 200,302). Use to focus on expected response types.",
+        "Filter code": "Exclude results that match specific HTTP codes (e.g., 404) to reduce noise and highlight interesting responses.",
+        "Extension fuzz": "Automatically append common file extensions from the wordlist (like .php, .html) to each entry, increasing chance of finding real files.",
+        "Depth limit": "When recursion is enabled, limit how deep the recursive exploration will go to avoid extremely deep or infinite crawls.",
+        "Rate limit": "Throttle the number of requests per second to the target to avoid overloading services or triggering defensive rate-limiting.",
+        "Time filter": "Filter results based on response time thresholds (find unusually slow or fast responses that may indicate hidden behavior).",
+        "Follow redirects": "Follow HTTP redirects when fuzzing; this helps discover content that is redirected but still relevant to the fuzzing target.",
+        "Ignore SSL": "Disable SSL certificate validation for HTTPS fuzzing which is useful when targeting servers with self-signed or invalid certificates.",
+    },
+}
+
+
+def _format_tooltip(
+    text: str,
+    max_width: int = 480,
+    bg_color: str | None = None,
+    text_color: str | None = None,
+    font_weight: str | None = None,
+    font_size: str | None = None,
+) -> str:
+    """Return an HTML-wrapped tooltip string with a max width to force wrapping.
+    Escapes HTML special chars and converts newlines to <br/> so tooltips
+    render safely and don't span the entire screen.
+    Optional `bg_color` and `text_color` allow per-tooltip color inversion
+    (e.g. white background / black text) to override the app-level QToolTip
+    stylesheet when needed.
+    """
+    if not text:
+        return ""
+    safe = html.escape(str(text))
+    safe = safe.replace("\n", "<br/>")
+    # default text color (keeps previous behavior)
+    tc = text_color or "#222"
+    bg = f"background:{bg_color};" if bg_color else ""
+    fw = f"font-weight: {font_weight};" if font_weight else "font-weight: normal;"
+    fs = f"font-size: {font_size};" if font_size else ""
+    # prefer a common UI font; allow caller to request lighter weight/size
+    return (
+        f'<div style=\'{bg} color:{tc}; {fw} {fs} font-family: "Segoe UI", sans-serif;'
+        f" max-width:{max_width}px; white-space:normal;'>{safe}</div>"
+    )
 
 
 # Returns a QFrame with rounded corners and background color
@@ -200,6 +377,45 @@ class RadioChoiceWidget(QWidget):
             except Exception:
                 pass
 
+
+# Hover filter for QLabel descriptions: change color on enter/leave without using
+# selector rules in per-widget stylesheets (avoids "Could not parse stylesheet" warnings).
+class HoverFilter(QObject):
+    def __init__(self, normal_color="#666", hover_color="#000000"):
+        super().__init__()
+        self.normal = normal_color
+        self.hover = hover_color
+
+    def eventFilter(self, obj, ev):
+        try:
+            if ev.type() == QEvent.Type.Enter:
+                base = obj.property("_base_style") or obj.styleSheet() or ""
+                normal = obj.property("_normal_color") or self.normal
+                hover = obj.property("_hover_color") or self.hover
+                # replace normal color with hover color if present, otherwise append hover color
+                if normal and normal in base:
+                    obj.setStyleSheet(base.replace(normal, hover))
+                else:
+                    obj.setStyleSheet(base + f" color: {hover};")
+                return False
+            if ev.type() == QEvent.Type.Leave:
+                # restore the stored base style if available
+                if obj.property("_base_style"):
+                    obj.setStyleSheet(obj.property("_base_style"))
+                else:
+                    base = obj.styleSheet() or ""
+                    hover = obj.property("_hover_color") or self.hover
+                    normal = obj.property("_normal_color") or self.normal
+                    if hover and hover in base:
+                        obj.setStyleSheet(base.replace(hover, normal))
+                return False
+        except Exception:
+            pass
+        return False
+
+
+# single shared filter instance
+_HOVER_FILTER = HoverFilter()
 
 # --- CollapsibleCategory: Tool Category Widget ---
 
@@ -319,9 +535,10 @@ class CollapsibleCategory(QWidget):
 
             # Add description label
             desc_label = QLabel(self.tool_descriptions.get(tool_name, ""))
-            desc_label.setStyleSheet(
-                "font-size: 11px; color: #666; font-style: italic;"
-            )
+            base = "font-size: 11px; color: #666; font-style: italic;"
+            desc_label.setProperty("_base_style", base)
+            desc_label.setStyleSheet(base)
+            desc_label.installEventFilter(_HOVER_FILTER)
             desc_label.setWordWrap(True)
             desc_label.setSizePolicy(
                 QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
@@ -471,10 +688,39 @@ class ToolNameBox(QFrame):
         for i, param in enumerate(parameters):
             cb = QCheckBox(param)
             cb.setChecked(checked_params[i] if i < len(checked_params) else False)
-            # slightly smaller checkbox text
-            cb.setStyleSheet("font-size: 14px; font-weight: normal; padding: 4px 0;")
+            # slightly smaller checkbox text; add hover color feedback
+            base_cb = (
+                "font-size: 14px; font-weight: normal; padding: 4px 0; color: #222;"
+            )
+            cb.setProperty("_base_style", base_cb)
+            cb.setProperty("_normal_color", "#222")
+            cb.setProperty("_hover_color", "#1976d2")
+            cb.setStyleSheet(base_cb)
+            cb.installEventFilter(_HOVER_FILTER)
             self.param_checks.append(cb)
             self.params_layout.addWidget(cb)
+            # show inline short description for beginners (below the checkbox)
+            try:
+                desc = PARAM_SHORT_DESCRIPTIONS.get(tool_name, {}).get(param)
+                if desc:
+                    lbl = QLabel(desc)
+                    # description label gets a hover color and tooltip as well
+                    base = "font-size: 11px; color: #666; font-style: italic; margin-left:6px;"
+                    lbl.setProperty("_base_style", base)
+                    lbl.setStyleSheet(base)
+                    lbl.installEventFilter(_HOVER_FILTER)
+                    lbl.setWordWrap(True)
+                    short = PARAM_SHORT_DESCRIPTIONS.get(tool_name, {}).get(param)
+                    detail = PARAM_DETAILED_DESCRIPTIONS.get(tool_name, {}).get(param)
+                    if detail:
+                        lbl.setToolTip(_format_tooltip(detail, font_size="17px"))
+                        cb.setToolTip(_format_tooltip(detail))
+                    elif short:
+                        lbl.setToolTip(_format_tooltip(short, font_size="17px"))
+                        cb.setToolTip(_format_tooltip(short))
+                    self.params_layout.addWidget(lbl)
+            except Exception:
+                pass
             # If this param needs a value, add a QLineEdit
             if param in nmap_value_required:
                 le = QLineEdit()
@@ -531,7 +777,19 @@ class ToolNameBox(QFrame):
     def set_tool(self, tool_name, description, parameters, checked_params):
         self.tool_name_label.setText(tool_name)
         # show the description as a hover tooltip on the tool name (keeps UI compact)
-        self.tool_name_label.setToolTip(description)
+        # Use a lighter weight and slightly smaller font to avoid a thick/bold appearance.
+        try:
+            self.tool_name_label.setToolTip(
+                _format_tooltip(
+                    description,
+                    # bg_color="#ffffff",
+                    text_color="#000000",
+                    font_weight="300",
+                    font_size="17px",
+                )
+            )
+        except Exception:
+            self.tool_name_label.setToolTip(description)
 
         # Remove all widgets from params_layout
         while self.params_layout.count():
@@ -618,6 +876,15 @@ class ToolNameBox(QFrame):
             self.protocol_widget.setMinimumWidth(140)
             # Increase radio text size to match checkboxes
             self.protocol_widget.setStyleSheet("QRadioButton { font-size:16px; }")
+            # Set beginner-friendly tooltip for protocol choice
+            try:
+                desc = PARAM_SHORT_DESCRIPTIONS.get(tool_name, {}).get(
+                    "Protocol (http/https)"
+                )
+                if desc:
+                    self.protocol_widget.setToolTip(desc)
+            except Exception:
+                pass
             self.params_layout.addWidget(
                 self.protocol_label, alignment=Qt.AlignmentFlag.AlignLeft
             )
@@ -731,6 +998,16 @@ class ToolNameBox(QFrame):
                 # The combo can be left blank to indicate "no specific server selected".
                 cb.setChecked(False)
                 cb.setVisible(False)
+                # set short tooltip for this parameter when available
+                try:
+                    short = PARAM_SHORT_DESCRIPTIONS.get(tool_name, {}).get(param)
+                    detail = PARAM_DETAILED_DESCRIPTIONS.get(tool_name, {}).get(param)
+                    if detail:
+                        cb.setToolTip(_format_tooltip(detail))
+                    elif short:
+                        cb.setToolTip(_format_tooltip(short))
+                except Exception:
+                    pass
                 self.param_checks.append(cb)
                 # Always show WHOIS server dropdown for -h as a combobox (even if not listed in value_required)
                 if param == "WHOIS server (-h)":
@@ -906,6 +1183,15 @@ class ToolNameBox(QFrame):
                             limit_combo_popup(combo, 10)
                         except Exception:
                             pass
+                        # apply short description tooltip to the input as well
+                        try:
+                            desc = PARAM_SHORT_DESCRIPTIONS.get(tool_name, {}).get(
+                                param
+                            )
+                            if desc:
+                                combo.setToolTip(desc)
+                        except Exception:
+                            pass
                         self.params_layout.addWidget(combo)
                         cb.value_input = combo
                     # WHOIS server dropdown
@@ -979,6 +1265,14 @@ class ToolNameBox(QFrame):
                         le = QLineEdit()
                         # reuse previous placeholders/tooltips logic
                         le.setPlaceholderText("Enter value")
+                        try:
+                            desc = PARAM_SHORT_DESCRIPTIONS.get(tool_name, {}).get(
+                                param
+                            )
+                            if desc:
+                                le.setToolTip(desc)
+                        except Exception:
+                            pass
                         self.params_layout.addWidget(le)
                         cb.value_input = le
                 else:
@@ -1010,9 +1304,45 @@ class ToolNameBox(QFrame):
             if orig_index is not None and orig_index < len(checked_params):
                 checked_state = checked_params[orig_index]
             cb.setChecked(checked_state)
-            cb.setStyleSheet("font-size: 16px; font-weight: normal; padding: 4px 0;")
+            base_cb = (
+                "font-size: 16px; font-weight: normal; padding: 4px 0; color: #222;"
+            )
+            cb.setProperty("_base_style", base_cb)
+            cb.setProperty("_normal_color", "#222")
+            cb.setProperty("_hover_color", "#1976d2")
+            cb.setStyleSheet(base_cb)
+            cb.installEventFilter(_HOVER_FILTER)
+            # set a short beginner-friendly tooltip if available
+            try:
+                short = PARAM_SHORT_DESCRIPTIONS.get(tool_name, {}).get(param)
+                detail = PARAM_DETAILED_DESCRIPTIONS.get(tool_name, {}).get(param)
+                if detail:
+                    cb.setToolTip(_format_tooltip(detail))
+                elif short:
+                    cb.setToolTip(_format_tooltip(short))
+            except Exception:
+                pass
             self.param_checks.append(cb)
             self.params_layout.addWidget(cb)
+            # inline description label for this parameter (helps beginners)
+            try:
+                desc = PARAM_SHORT_DESCRIPTIONS.get(tool_name, {}).get(param)
+                if desc:
+                    lbl = QLabel(desc)
+                    base = "font-size: 11px; color: #666; font-style: italic; margin-left:6px;"
+                    lbl.setProperty("_base_style", base)
+                    lbl.setStyleSheet(base)
+                    lbl.installEventFilter(_HOVER_FILTER)
+                    lbl.setWordWrap(True)
+                    short = PARAM_SHORT_DESCRIPTIONS.get(tool_name, {}).get(param)
+                    detail = PARAM_DETAILED_DESCRIPTIONS.get(tool_name, {}).get(param)
+                    if detail:
+                        lbl.setToolTip(_format_tooltip(detail, font_size="17px"))
+                    elif short:
+                        lbl.setToolTip(_format_tooltip(short, font_size="17px"))
+                    self.params_layout.addWidget(lbl)
+            except Exception:
+                pass
 
             # If this param needs a value (either required or optional), add a QLineEdit and attach it to the checkbox
             needs_value = (param in current_value_required) or (
@@ -1084,6 +1414,13 @@ class ToolNameBox(QFrame):
                         pass
                     # enforce visual max items
                     limit_combo_popup(combo, 10)
+                    # apply short description if present
+                    try:
+                        desc = PARAM_SHORT_DESCRIPTIONS.get(tool_name, {}).get(param)
+                        if desc:
+                            combo.setToolTip(desc)
+                    except Exception:
+                        pass
                     self.params_layout.addWidget(combo)
                     cb.value_input = combo
                 # NEW: Protocol should be radio buttons (not a textbox) — but we created a dedicated widget above;
@@ -1187,6 +1524,14 @@ class ToolNameBox(QFrame):
                     # WhatWeb-specific placeholders/tooltips (match whatweb_tool.py labels)
                     elif param == "User-Agent (--user-agent)":
                         le.setPlaceholderText("Custom User-Agent string")
+                        try:
+                            desc = PARAM_SHORT_DESCRIPTIONS.get(tool_name, {}).get(
+                                param
+                            )
+                            if desc:
+                                le.setToolTip(desc)
+                        except Exception:
+                            pass
                     #    le.setToolTip("Set the User-Agent header for requests (helps evade basic blocks).")
                     elif param == "Follow redirects (--follow-redirect)":
                         le.setPlaceholderText("always | same-origin | never")
@@ -1777,46 +2122,6 @@ class HelloWindow(QWidget):
         # track which tools are currently running (lowercase keys)
         self._scan_running_tools = set()
 
-        clear_terminal_button = QPushButton("Clear")
-        clear_terminal_button.setStyleSheet(
-            "font-size: 16px; border-radius: 8px; background: #757575; color: white; font-weight: bold; padding: 8px 24px;"
-        )
-        # Place "Scan All" on the same row as "Clear", with Scan All on the left and Clear on the right.
-        terminal_btn_row = QHBoxLayout()
-        # terminal row: only keep Clear / layout controls here (Scan Selected moved to middle controls)
-        terminal_btn_row.addStretch()
-        terminal_btn_row.addWidget(
-            clear_terminal_button, alignment=Qt.AlignmentFlag.AlignRight
-        )
-        div3_layout.addLayout(terminal_btn_row)
-
-        def clear_xterm():
-            choice = show_terminal_clear_choice(self)
-            if choice is None:
-                return  # Cancelled
-            try:
-                if choice == "this":
-                    cur = self.terminal_tabs.currentWidget()
-                    if cur and hasattr(cur, "page"):
-                        cur.page().runJavaScript("window.term.clear()")
-                elif choice == "all":
-                    # iterate all created terminal views and clear each one
-                    for view in list(self.terminal_views.values()):
-                        try:
-                            if view and hasattr(view, "page"):
-                                view.page().runJavaScript("window.term.clear()")
-                        except Exception:
-                            # ignore per-view failures and continue
-                            pass
-            except Exception:
-                pass
-
-        clear_terminal_button.clicked.connect(clear_xterm)
-
-        # connect the unified scan-selected toggle
-        self.scan_selected_btn.clicked.connect(self.handle_scan_selected_toggle)
-
-        # (removed duplicate connections above to avoid invoking handlers twice)
         div3.setLayout(div3_layout)
         div3.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         top_layout.addWidget(div3, stretch=5)
@@ -1887,12 +2192,6 @@ class HelloWindow(QWidget):
             "font-size: 16px; border-radius: 8px; background: #1976d2; color: white; font-weight: bold; padding: 8px 24px;"
         )
         export_row.addWidget(self.export_button)
-        # Clear results button
-        self.clear_results_button = QPushButton("Clear Results")
-        self.clear_results_button.setStyleSheet(
-            "font-size: 16px; border-radius: 8px; background: #757575; color: white; font-weight: bold; padding: 8px 24px;"
-        )
-        export_row.addWidget(self.clear_results_button)
         results_layout.addLayout(export_row)
         results.setLayout(results_layout)
         results.setSizePolicy(
@@ -1921,12 +2220,6 @@ class HelloWindow(QWidget):
             "font-size: 16px; border-radius: 8px; background: #1976d2; color: white; font-weight: bold; padding: 8px 24px;"
         )
         diag_export_row.addWidget(self.diag_export_button)
-        # Clear insights button
-        self.clear_diag_button = QPushButton("Clear Insights")
-        self.clear_diag_button.setStyleSheet(
-            "font-size: 16px; border-radius: 8px; background: #757575; color: white; font-weight: bold; padding: 8px 24px;"
-        )
-        diag_export_row.addWidget(self.clear_diag_button)
         diagnostics_layout.addLayout(diag_export_row)
         diagnostics.setLayout(diagnostics_layout)
         diagnostics.setSizePolicy(
@@ -1960,14 +2253,23 @@ class HelloWindow(QWidget):
         # Connect buttons
         # scan_button is already connected above; keep other button connections unchanged
         self.export_button.clicked.connect(self.handle_export_results)
-        self.clear_results_button.clicked.connect(self.handle_clear_results)
         self.diag_export_button.clicked.connect(self.handle_export_diagnostics)
-
-        self.clear_diag_button.clicked.connect(self.handle_clear_diagnostics)
 
         # install quick tooltip filter on the right-side label so tooltip appears immediately
         try:
             self.tool_name_box.tool_name_label.installEventFilter(self._tooltip_filter)
+            # Also install the quick tooltip filter on any parameter widgets that have a tooltip
+            try:
+                params_widget = getattr(self.tool_name_box, "params_widget", None)
+                if params_widget is not None:
+                    for w in params_widget.findChildren(QWidget):
+                        try:
+                            if w.toolTip():
+                                w.installEventFilter(self._tooltip_filter)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -2040,6 +2342,18 @@ class HelloWindow(QWidget):
         # install quick tooltip filter on the right-side label so tooltip appears immediately
         try:
             self.tool_name_box.tool_name_label.installEventFilter(self._tooltip_filter)
+            # Also install on parameter widgets so their hover uses the same quick tooltip
+            try:
+                params_widget = getattr(self.tool_name_box, "params_widget", None)
+                if params_widget is not None:
+                    for w in params_widget.findChildren(QWidget):
+                        try:
+                            if w.toolTip():
+                                w.installEventFilter(self._tooltip_filter)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -5344,10 +5658,21 @@ class HelloWindow(QWidget):
             if not tool_key:
                 return
             key = tool_key.lower()
+            prev_count = len(self._scan_running_tools)
             if running:
                 self._scan_running_tools.add(key)
             else:
                 self._scan_running_tools.discard(key)
+            new_count = len(self._scan_running_tools)
+            # If we transitioned from some running scans to none, show a debugger message
+            if prev_count > 0 and new_count == 0:
+                try:
+                    if getattr(self, "results_textbox", None):
+                        self.results_textbox.append(
+                            '<div style="font-size:10pt; color:#2e7d32;"><b>All scans finished.</b></div>'
+                        )
+                except Exception:
+                    pass
 
             # If the button exists and the tool matches the currently selected tool, update appearance
             if getattr(self, "scan_button", None):
@@ -5381,34 +5706,143 @@ class HelloWindow(QWidget):
 
 # --- Quick tooltip filter: show tooltip immediately on hover (Enter), hide on Leave.
 class QuickTooltipFilter(QObject):
-    def __init__(self, parent=None):
+    """Event filter that shows tooltips after a short delay when hovering
+    the right-side tool name label or any widget inside the parameters panel.
+    """
+
+    def __init__(self, parent=None, delay_ms: int = 4000):
         super().__init__(parent)
+        self.delay_ms = delay_ms
+        # map id(obj) -> QTimer
+        self._timers: dict[int, QTimer] = {}
+
+    def _start_timer(self, obj):
+        try:
+            key = id(obj)
+            # cancel existing timer for this object
+            existing = self._timers.get(key)
+            if existing:
+                try:
+                    existing.stop()
+                except Exception:
+                    pass
+                del self._timers[key]
+
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            # Temporarily disable the widget's native tooltip handling so the
+            # system doesn't show the tooltip before our delayed timer fires.
+            try:
+                orig_has = False
+                try:
+                    orig_has = obj.testAttribute(Qt.WidgetAttribute.WA_HasToolTip)
+                except Exception:
+                    orig_has = False
+                obj.setProperty("_qt_orig_has_tooltip", orig_has)
+                try:
+                    obj.setAttribute(Qt.WidgetAttribute.WA_HasToolTip, False)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+            def _on_timeout():
+                try:
+                    txt = obj.toolTip() or ""
+                    # only show if still hovered
+                    if txt and getattr(obj, "underMouse", lambda: False)():
+                        QToolTip.showText(QCursor.pos(), txt, obj)
+                except Exception:
+                    pass
+                finally:
+                    # restore original WA_HasToolTip attribute if we changed it
+                    try:
+                        orig = obj.property("_qt_orig_has_tooltip")
+                        if orig is not None:
+                            try:
+                                obj.setAttribute(
+                                    Qt.WidgetAttribute.WA_HasToolTip, bool(orig)
+                                )
+                            except Exception:
+                                pass
+                            obj.setProperty("_qt_orig_has_tooltip", None)
+                    except Exception:
+                        pass
+                    try:
+                        if key in self._timers:
+                            del self._timers[key]
+                    except Exception:
+                        pass
+
+            timer.timeout.connect(_on_timeout)
+            self._timers[key] = timer
+            timer.start(self.delay_ms)
+        except Exception:
+            pass
+
+    def _cancel_timer(self, obj):
+        try:
+            key = id(obj)
+            t = self._timers.pop(key, None)
+            if t:
+                try:
+                    t.stop()
+                except Exception:
+                    pass
+            # restore WA_HasToolTip attribute if we disabled it
+            try:
+                orig = obj.property("_qt_orig_has_tooltip")
+                if orig is not None:
+                    try:
+                        obj.setAttribute(Qt.WidgetAttribute.WA_HasToolTip, bool(orig))
+                    except Exception:
+                        pass
+                    obj.setProperty("_qt_orig_has_tooltip", None)
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def eventFilter(self, obj, event):
         try:
-            # Only show the quick tooltip for the main tool name label on the right side.
-            # Guard if parent or tool_name_box isn't available.
             parent = self.parent()
             target_label = None
+            params_widget = None
             try:
-                target_label = (
-                    getattr(parent, "tool_name_box", None).tool_name_label
-                    if parent and getattr(parent, "tool_name_box", None)
-                    else None
-                )
+                tbox = getattr(parent, "tool_name_box", None) if parent else None
+                if tbox:
+                    target_label = getattr(tbox, "tool_name_label", None)
+                    params_widget = getattr(tbox, "params_widget", None)
             except Exception:
                 target_label = None
+                params_widget = None
 
-            if obj is not target_label:
-                # ignore events from other widgets (prevents left-side buttons from triggering)
+            from PyQt6.QtWidgets import QWidget
+
+            is_param_child = False
+            try:
+                if params_widget is not None:
+                    if obj is params_widget:
+                        is_param_child = True
+                    else:
+                        if obj in params_widget.findChildren(QWidget):
+                            is_param_child = True
+            except Exception:
+                is_param_child = False
+
+            if obj is not target_label and not is_param_child:
                 return False
 
             if event.type() == QEvent.Type.Enter:
                 txt = obj.toolTip() or ""
                 if txt:
-                    QToolTip.showText(QCursor.pos(), txt, obj)
+                    # start delayed show
+                    self._start_timer(obj)
                 return False
+
             if event.type() == QEvent.Type.Leave:
+                # cancel any pending show and hide visible tooltip
+                self._cancel_timer(obj)
                 QToolTip.hideText()
                 return False
         except Exception:
