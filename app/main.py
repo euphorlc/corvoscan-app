@@ -2185,14 +2185,7 @@ class HelloWindow(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         results_layout.addWidget(self.results_textbox, stretch=1)
-        export_row = QHBoxLayout()
-        export_row.addStretch()
-        self.export_button = QPushButton("Export")
-        self.export_button.setStyleSheet(
-            "font-size: 16px; border-radius: 8px; background: #1976d2; color: white; font-weight: bold; padding: 8px 24px;"
-        )
-        export_row.addWidget(self.export_button)
-        results_layout.addLayout(export_row)
+        # Results export button removed per user request (no button shown below Results)
         results.setLayout(results_layout)
         results.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
@@ -2215,7 +2208,7 @@ class HelloWindow(QWidget):
         diagnostics_layout.addWidget(self.diagnostics_textbox, stretch=1)
         diag_export_row = QHBoxLayout()
         diag_export_row.addStretch()
-        self.diag_export_button = QPushButton("Export")
+        self.diag_export_button = QPushButton("Export results and insights")
         self.diag_export_button.setStyleSheet(
             "font-size: 16px; border-radius: 8px; background: #1976d2; color: white; font-weight: bold; padding: 8px 24px;"
         )
@@ -2252,8 +2245,8 @@ class HelloWindow(QWidget):
 
         # Connect buttons
         # scan_button is already connected above; keep other button connections unchanged
-        self.export_button.clicked.connect(self.handle_export_results)
-        self.diag_export_button.clicked.connect(self.handle_export_diagnostics)
+        # Results export removed; diagnostics export now produces combined Results+Insights
+        self.diag_export_button.clicked.connect(self.handle_export_combined)
 
         # install quick tooltip filter on the right-side label so tooltip appears immediately
         try:
@@ -5476,7 +5469,8 @@ class HelloWindow(QWidget):
                         html_parts.append("</body></html>")
 
                         doc = QTextDocument()
-                        doc.setHtml(html_parts)
+                        # html_parts is a list of strings; setHtml expects a single string
+                        doc.setHtml("".join(html_parts))
                         printer = QPrinter()
                         printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
                         printer.setOutputFileName(filename)
@@ -5554,6 +5548,195 @@ class HelloWindow(QWidget):
         except Exception as e:
             show_critical_popup(
                 self, f"Failed to export diagnostics:\n{str(e)}", "Export Error"
+            )
+
+    def handle_export_combined(self):
+        """Export combined Results and Diagnostics for each tool into a single PDF."""
+        try:
+            results = self.results_manager.get_all_results()
+            if not results:
+                show_info_popup(
+                    self, "No results to export. Run a scan first.", "Export Results"
+                )
+                return
+
+            filename, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Combined Results+Diagnostics",
+                f"corvoscan_combined_{results[0].target}_{len(results)}_scans.pdf",
+                "PDF Files (*.pdf);;All Files (*)",
+            )
+            if not filename:
+                return
+            lf = filename.lower()
+            if not lf.endswith(".pdf"):
+                show_info_popup(
+                    self,
+                    "Please choose a .pdf filename for the combined export.",
+                    "Export",
+                )
+                return
+
+            import html as _html
+            import re
+
+            # Group results by tool name preserving first-seen order (use lowercase keys)
+            grouped = {}
+            order = []
+            for r in results:
+                raw_tool = getattr(r, "tool_name", "UNKNOWN") or "UNKNOWN"
+                display_name = str(raw_tool)
+                key = display_name.lower()
+                if key not in grouped:
+                    grouped[key] = {"display_name": display_name.upper(), "results": []}
+                    order.append(key)
+                grouped[key]["results"].append(r)
+
+            html_parts = [
+                "<html><head><meta charset='utf-8'><style>"
+                "body{font-family:Arial,Helvetica,sans-serif;}"
+                "h1{font-size:14pt;margin:8px 0 6px 0;}"
+                "h2{font-size:12pt;margin:6px 0;}"
+                "pre{white-space:pre-wrap; font-family:monospace; background:#f9f9f9; padding:8px; border-radius:6px;}"
+                "table{border-collapse:collapse; width:100%; margin-top:6px;}"
+                "td,th{border:1px solid #ddd; padding:6px; font-size:9pt;}"
+                "</style></head><body>"
+            ]
+
+            # Header block: simple centered report heading, target, timestamp,
+            # then an <hr> and bottom margin before the first results block.
+            try:
+                from datetime import datetime
+
+                report_target = _html.escape(
+                    str(getattr(results[0], "target", "") or "")
+                )
+                gen_ts = _html.escape(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                header_html = (
+                    "<div style='width:100%; text-align:center; margin-top:8px; margin-bottom:8px;'>"
+                    f"<div style='font-size:24pt; font-weight:bold; text-align:center;'>CorvoScan Report File</div>"
+                    "<div style='height:8px;'>&nbsp;</div>"
+                    f"<div style='font-size:10pt; text-align:center;'>Target: {report_target}</div>"
+                    f"<div style='font-size:9pt; text-align:center; margin-top:6px;'>Generated: {gen_ts}</div>"
+                    "<hr style='margin-top:12px; margin-bottom:14px;'/>"
+                    "<div style='margin-bottom:18px;'></div>"
+                    "</div>"
+                )
+                html_parts.append(header_html)
+            except Exception:
+                pass
+
+            # Reuse rendering functions by calling them into temporary QTextEdit widgets
+            for key in order:
+                display_name = grouped[key]["display_name"]
+                for r in grouped[key]["results"]:
+                    # Render formatted results into temporary widget
+                    temp_results = QTextEdit()
+                    temp_results.setReadOnly(True)
+                    orig_results_widget = getattr(self, "results_textbox", None)
+                    try:
+                        self.results_textbox = temp_results
+                        handler_name = f"display_{key}_results"
+                        handler = getattr(self, handler_name, None)
+                        if handler:
+                            try:
+                                handler(r)
+                            except Exception:
+                                temp_results.append(
+                                    f"<h1>{_html.escape(display_name)} RESULTS</h1>"
+                                )
+                                temp_results.append(
+                                    f"<pre>{_html.escape(getattr(r, 'raw_output', '') or '')}</pre>"
+                                )
+                        else:
+                            temp_results.append(
+                                f"<h1>{_html.escape(display_name)} RESULTS</h1>"
+                            )
+                            temp_results.append(
+                                f"<pre>{_html.escape(getattr(r, 'raw_output', '') or '')}</pre>"
+                            )
+                        res_html = temp_results.document().toHtml()
+                        m = re.search(
+                            r"<body[^>]*>(.*)</body>", res_html, flags=re.I | re.S
+                        )
+                        res_body = m.group(1) if m else res_html
+                        # Add a clear heading for the results section (fixed size)
+                        html_parts.append(
+                            f"<h2 style='margin-top:8px; font-size:14pt;'>{_html.escape(display_name)} RESULTS</h2>"
+                        )
+                        # Ensure timestamp appears under the Results heading. Only add
+                        # if the rendered result body doesn't already contain a Timestamp label.
+                        try:
+                            ts_val = _html.escape(
+                                str(getattr(r, "timestamp", "") or "")
+                            )
+                        except Exception:
+                            ts_val = ""
+                        if ts_val and "Timestamp:" not in (res_body or ""):
+                            html_parts.append(
+                                f"<div style='font-size:10pt; margin-bottom:6px;'><b>Timestamp:</b> {ts_val}</div>"
+                            )
+                        html_parts.append(res_body)
+                        # add a bit of vertical space between Results and Diagnostics
+                        # Use a non-empty div (with a nbsp and line-height) so QTextDocument
+                        # doesn't collapse it when rendering to PDF.
+                        html_parts.append(
+                            "<div style='height:24px; font-size:1px; line-height:24px;'>&nbsp;</div>"
+                        )
+                    finally:
+                        self.results_textbox = orig_results_widget
+
+                    # Render diagnostics into temporary widget
+                    temp_diag = QTextEdit()
+                    temp_diag.setReadOnly(True)
+                    orig_diag_widget = getattr(self, "diagnostics_textbox", None)
+                    try:
+                        self.diagnostics_textbox = temp_diag
+                        try:
+                            self.update_diagnostics(r)
+                        except Exception:
+                            temp_diag.append(
+                                f"<h2>{_html.escape(display_name)} DIAGNOSTICS</h2>"
+                            )
+                            temp_diag.append(
+                                "<div><i>No diagnostics available</i></div>"
+                            )
+                        diag_html = temp_diag.document().toHtml()
+                        m2 = re.search(
+                            r"<body[^>]*>(.*)</body>", diag_html, flags=re.I | re.S
+                        )
+                        diag_body = m2.group(1) if m2 else diag_html
+                        # Add a clear heading for the diagnostics section (same size as results)
+                        # Strip trailing broken separator lines (hr or long dash divs) from the captured diagnostics
+                        diag_body = re.sub(
+                            r"(?i)(?:<hr\s*/?>|<div[^>]*>[\-—\s]+</div>)+\s*$",
+                            "",
+                            diag_body,
+                        )
+                        html_parts.append(
+                            f"<h2 style='margin-top:8px; font-size:14pt;'>{_html.escape(display_name)} INSIGHTS</h2>"
+                        )
+                        html_parts.append(diag_body)
+                    finally:
+                        self.diagnostics_textbox = orig_diag_widget
+
+                    html_parts.append("<hr/>")
+
+            html_parts.append("</body></html>")
+
+            doc = QTextDocument()
+            doc.setHtml("".join(html_parts))
+            printer = QPrinter()
+            printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+            printer.setOutputFileName(filename)
+            doc.print(printer)
+            show_info_popup(
+                self, f"Combined export written to:\n{filename}", "Export Complete"
+            )
+
+        except Exception as e:
+            show_critical_popup(
+                self, f"Failed to export combined PDF:\n{str(e)}", "Export Error"
             )
 
     def handle_clear_results(self):
