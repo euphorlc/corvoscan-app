@@ -952,13 +952,22 @@ class WhoisParser(ToolResultsParser):
                 ruleset = {}
         defaults = ruleset.get("defaults", {}) if isinstance(ruleset, dict) else {}
 
-        def add(sev, msg, ctx=None):
+        def add(sev, msg, ctx=None, insight=None, remediation=None):
             entry = {
                 "severity": sev or defaults.get("severity", "Info"),
                 "message": msg,
             }
             if ctx:
                 entry["context"] = ctx
+            # support rule-specific insight/remediation with fallback to defaults
+            ins = insight if insight is not None else defaults.get("insight")
+            rem = (
+                remediation if remediation is not None else defaults.get("remediation")
+            )
+            if ins:
+                entry["insight"] = ins
+            if rem:
+                entry["remediation"] = rem
             if entry not in diags:
                 diags.append(entry)
 
@@ -1020,7 +1029,13 @@ class WhoisParser(ToolResultsParser):
                         msg = (
                             rule.get("message") or f"Registrar rule matched: {pattern}"
                         )
-                        add(sev, msg, f"registrar: {reg}")
+                        add(
+                            sev,
+                            msg,
+                            f"registrar: {reg}",
+                            rule.get("insight"),
+                            rule.get("remediation"),
+                        )
                 except Exception:
                     continue
 
@@ -1155,6 +1170,6 @@ class WhoisParser(ToolResultsParser):
                     if creation_year
                     else f"year={year_val}"
                 )
-                add(sev, msg, ctx)
+                add(sev, msg, ctx, rule.get("insight"), rule.get("remediation"))
 
         return diags

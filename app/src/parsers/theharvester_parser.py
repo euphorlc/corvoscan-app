@@ -518,13 +518,22 @@ class TheHarvesterParser(ToolResultsParser):
                 ruleset = {}
         defaults = ruleset.get("defaults", {}) if isinstance(ruleset, dict) else {}
 
-        def add(sev, msg, ctx=None):
+        def add(sev, msg, ctx=None, insight=None, remediation=None):
             entry = {
                 "severity": sev or defaults.get("severity", "Info"),
                 "message": msg,
             }
             if ctx:
                 entry["context"] = ctx
+            # support rule-specific insight/remediation with fallback to defaults
+            ins = insight if insight is not None else defaults.get("insight")
+            rem = (
+                remediation if remediation is not None else defaults.get("remediation")
+            )
+            if ins:
+                entry["insight"] = ins
+            if rem:
+                entry["remediation"] = rem
             if entry not in diags:
                 diags.append(entry)
 
@@ -564,10 +573,12 @@ class TheHarvesterParser(ToolResultsParser):
                 continue
             severity = rule.get("severity") or defaults.get("severity") or "Info"
             message = rule.get("message") or f"Hostname rule matched: {pattern}"
+            insight = rule.get("insight")
+            remediation = rule.get("remediation")
             for hn in hostnames:
                 try:
                     if matches(pattern, hn):
-                        add(severity, message, f"host: {hn}")
+                        add(severity, message, f"host: {hn}", insight, remediation)
                 except Exception:
                     continue
 
