@@ -800,13 +800,22 @@ class NSLookupParser(ToolResultsParser):
                 ruleset = {}
         defaults = ruleset.get("defaults", {}) if isinstance(ruleset, dict) else {}
 
-        def add(sev, msg, ctx=None):
+        def add(sev, msg, ctx=None, insight=None, remediation=None):
             entry = {
                 "severity": sev or defaults.get("severity", "Info"),
                 "message": msg,
             }
             if ctx:
                 entry["context"] = ctx
+            # support rule-specific insight/remediation with fallback to defaults
+            ins = insight if insight is not None else defaults.get("insight")
+            rem = (
+                remediation if remediation is not None else defaults.get("remediation")
+            )
+            if ins:
+                entry["insight"] = ins
+            if rem:
+                entry["remediation"] = rem
             if entry not in diags:
                 diags.append(entry)
 
@@ -880,7 +889,13 @@ class NSLookupParser(ToolResultsParser):
                         if pattern.lower() not in rec["value"].lower():
                             continue
                 # use a shorter context (no leading "record ")
-                add(severity, message, f"{rec['name']} -> {rec['value']}")
+                add(
+                    severity,
+                    message,
+                    f"{rec['name']} -> {rec['value']}",
+                    rule.get("insight"),
+                    rule.get("remediation"),
+                )
 
         # --- MX priority checks using mx_rule from nslookup_ruleset.json ---
         try:
@@ -924,6 +939,8 @@ class NSLookupParser(ToolResultsParser):
                         no_mx_rule.get("message")
                         or "No MX records found — domain may not be configured to receive email.",
                         None,
+                        no_mx_rule.get("insight"),
+                        no_mx_rule.get("remediation"),
                     )
             elif len(mx_recs) > 1:
                 # build mapping: priority (int or None) -> [hosts]
@@ -975,7 +992,13 @@ class NSLookupParser(ToolResultsParser):
                         (same_rule.get("message") if same_rule else None)
                         or "Emails may be delivered to any of these servers for load balancing."
                     )
-                    add(sev, msg, ", ".join(hosts))
+                    add(
+                        sev,
+                        msg,
+                        ", ".join(hosts),
+                        same_rule.get("insight") if same_rule else None,
+                        same_rule.get("remediation") if same_rule else None,
+                    )
                 else:
                     # different priorities => delivery ordering; lowest numeric value is preferred
                     ordered = sorted(
@@ -993,7 +1016,13 @@ class NSLookupParser(ToolResultsParser):
                         (diff_rule.get("message") if diff_rule else None)
                         or "Multiple MX records with different priorities. Emails will be delivered to the lowest-priority server first."
                     )
-                    add(sev, msg, "; ".join(ctx_parts))
+                    add(
+                        sev,
+                        msg,
+                        "; ".join(ctx_parts),
+                        diff_rule.get("insight") if diff_rule else None,
+                        diff_rule.get("remediation") if diff_rule else None,
+                    )
         except Exception:
             # don't let diagnostics parsing break the whole parser
             pass
@@ -1042,7 +1071,13 @@ class NSLookupParser(ToolResultsParser):
                                 )
                                 # short context: show domain and provider only
                                 ctx = f"{rec.get('name') or '<root>'}, {provider}"
-                                add(sev, msg, ctx)
+                                add(
+                                    sev,
+                                    msg,
+                                    ctx,
+                                    rule.get("insight"),
+                                    rule.get("remediation"),
+                                )
                                 # break so same TXT value isn't duplicated by other rules for same provider
                                 break
                         except re.error:
@@ -1060,7 +1095,13 @@ class NSLookupParser(ToolResultsParser):
                                         or f"Third-party integration detected: {provider}"
                                     )
                                     ctx = f"{rec.get('name') or '<root>'} -> {txt_val[:60].replace('\\n', ' ')}"
-                                    add(sev, msg, ctx)
+                                    add(
+                                        sev,
+                                        msg,
+                                        ctx,
+                                        rule.get("insight"),
+                                        rule.get("remediation"),
+                                    )
                                     break
                             except Exception:
                                 continue
@@ -1158,9 +1199,21 @@ class NSLookupParser(ToolResultsParser):
                             # use very short context (field=value) to avoid dumping whole SOA
                             ctx = f"{short_name}: {field}={val}s"
                             if cond == "<" and val < thresh:
-                                add(sev, msg, ctx)
+                                add(
+                                    sev,
+                                    msg,
+                                    ctx,
+                                    rule.get("insight"),
+                                    rule.get("remediation"),
+                                )
                             elif cond == ">" and val > thresh:
-                                add(sev, msg, ctx)
+                                add(
+                                    sev,
+                                    msg,
+                                    ctx,
+                                    rule.get("insight"),
+                                    rule.get("remediation"),
+                                )
                         except Exception:
                             continue
         except Exception:
@@ -1210,6 +1263,12 @@ class NSLookupParser(ToolResultsParser):
                     except re.error:
                         if pattern.lower() not in rec["value"].lower():
                             continue
-                add(severity, message, f"{rec['name']} -> {rec['value']}")
+                add(
+                    severity,
+                    message,
+                    f"{rec['name']} -> {rec['value']}",
+                    rule.get("insight"),
+                    rule.get("remediation"),
+                )
 
         return diags
