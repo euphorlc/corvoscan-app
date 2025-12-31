@@ -560,13 +560,16 @@ class WhatWebParser:
                 ruleset = {}
         defaults = ruleset.get("defaults", {}) if isinstance(ruleset, dict) else {}
 
-        def add(sev, msg, ctx=None):
+        def add(sev, msg, ctx=None, insight=None):
             entry = {
                 "severity": sev or defaults.get("severity", "Info"),
                 "message": msg,
             }
+            # propagate optional context/insight
             if ctx:
                 entry["context"] = ctx
+            if insight:
+                entry["insight"] = insight
             if entry not in diags:
                 diags.append(entry)
 
@@ -751,14 +754,15 @@ class WhatWebParser:
                         or defaults.get("message")
                         or "Server rule matched"
                     )
+                    insight_val = rule.get("insight") or defaults.get("insight")
                     for hay in hay_sources:
                         try:
                             if re.search(pattern, hay or "", re.IGNORECASE):
-                                add(sev, msg, f"server:{pattern}")
+                                add(sev, msg, f"server:{pattern}", insight_val)
                                 break
                         except re.error:
                             if pattern.lower() in (hay or ""):
-                                add(sev, msg, f"server:{pattern}")
+                                add(sev, msg, f"server:{pattern}", insight_val)
                                 break
                 try:
                     ruleset.pop("server_rule", None)
@@ -791,13 +795,14 @@ class WhatWebParser:
                         or defaults.get("message")
                         or f"{group_name} matched"
                     )
+                    insight_val = rule.get("insight") or defaults.get("insight")
                     matched = False
 
                     if group_name in ("security_header_rule", "uncommon_header_rule"):
                         for hn, hv in hdrs.items():
                             hay = f"{hn}:{hv}"
                             if matches(pattern, hay):
-                                add(severity, message, f"header {hn}")
+                                add(severity, message, f"header {hn}", insight_val)
                                 matched = True
                                 break
                         if matched:
@@ -806,7 +811,7 @@ class WhatWebParser:
                     if group_name == "cookie_rule" and cookies_list:
                         for ck in cookies_list:
                             if matches(pattern, ck):
-                                add(severity, message, f"cookie {ck}")
+                                add(severity, message, f"cookie {ck}", insight_val)
                                 matched = True
                                 break
                         if matched:
@@ -815,7 +820,7 @@ class WhatWebParser:
                     if group_name == "exposed_file_rule" and found_files:
                         for fn in found_files:
                             if matches(pattern, fn):
-                                add(severity, message, f"file {fn}")
+                                add(severity, message, f"file {fn}", insight_val)
                                 matched = True
                                 break
                         if matched:
@@ -824,7 +829,7 @@ class WhatWebParser:
                     if group_name == "cms_plugin_rule" and plugins_list:
                         for p in plugins_list:
                             if matches(pattern, p):
-                                add(severity, message, f"plugin {p}")
+                                add(severity, message, f"plugin {p}", insight_val)
                                 matched = True
                                 break
                         if matched:
@@ -833,7 +838,7 @@ class WhatWebParser:
                     if group_name == "redirect_rule" and redirects:
                         for r in redirects:
                             if matches(pattern, r):
-                                add(severity, message, f"redirect {r}")
+                                add(severity, message, f"redirect {r}", insight_val)
                                 matched = True
                                 break
                         if matched:
@@ -847,7 +852,7 @@ class WhatWebParser:
 
                     if matches(pattern, src):
                         ctx = group_name
-                        add(severity, message, ctx)
+                        add(severity, message, ctx, insight_val)
                 except Exception:
                     continue
 
